@@ -1,0 +1,96 @@
+{% extends 'base.html' %}
+{% load study_filters %}
+
+{% block title %}복습 관리 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4">복습 관리</h2>
+    
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5 class="card-title">복습 일정</h5>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>단어</th>
+                                    <th>의미</th>
+                                    <th>마지막 학습일</th>
+                                    <th>숙련도</th>
+                                    <th>복습 예정일</th>
+                                    <th>액션</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for schedule in review_schedules %}
+                                <tr>
+                                    <td>{{ schedule.word.english }}</td>
+                                    <td>{{ schedule.word.korean }}</td>
+                                    <td>{{ schedule.last_reviewed|date:"Y-m-d" }}</td>
+                                    <td>
+                                        <div class="progress">
+                                            <div class="progress-bar" role="progressbar" 
+                                                style="width: {{ schedule.proficiency|multiply:20 }}%"
+                                                aria-valuenow="{{ schedule.proficiency }}" 
+                                                aria-valuemin="0" 
+                                                aria-valuemax="5">
+                                                {{ schedule.proficiency }}/5
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ schedule.scheduled_date|date:"Y-m-d" }}</td>
+                                    <td>
+                                        <button class="btn btn-sm btn-primary" 
+                                                onclick="startReview('{{ schedule.word.id }}')">
+                                            복습하기
+                                        </button>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="text-center">
+                                        현재 복습할 단어가 없습니다.
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center">
+                <a href="{% url 'study:study_home' %}" class="btn btn-outline-secondary">
+                    홈으로 돌아가기
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function startReview(wordId) {
+    // 복습 세션 시작
+    fetch(`/study/review/start/${wordId}/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert('복습 세션을 시작하는데 문제가 발생했습니다.');
+        }
+    });
+}
+</script>
+{% endblock %} 

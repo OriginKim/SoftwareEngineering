@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+
+{% block title %}단어 목록 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>단어 목록</h2>
+        {% if is_teacher %}
+        <a href="{% url 'vocabulary:word_add' %}" class="btn btn-primary">
+            <i class="bi bi-plus"></i> 단어 추가
+        </a>
+        {% endif %}
+    </div>
+    
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>영단어</th>
+                            <th>한글 뜻</th>
+                            <th>품사</th>
+                            <th>난이도</th>
+                            <th>등록일</th>
+                            {% if is_teacher %}
+                            <th>액션</th>
+                            {% endif %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for word in page_obj %}
+                        <tr>
+                            <td>{{ word.english }}</td>
+                            <td>{{ word.korean }}</td>
+                            <td>{{ word.get_part_of_speech_display }}</td>
+                            <td>
+                                <span class="badge {% if word.difficulty == 'easy' %}bg-success{% elif word.difficulty == 'medium' %}bg-warning{% else %}bg-danger{% endif %}">
+                                    {{ word.get_difficulty_display }}
+                                </span>
+                            </td>
+                            <td>{{ word.created_at|date:"Y-m-d" }}</td>
+                            {% if is_teacher %}
+                            <td>
+                                <a href="{% url 'vocabulary:word_edit' word.id %}" class="btn btn-sm btn-outline-primary">
+                                    수정
+                                </a>
+                                <form method="post" action="{% url 'vocabulary:word_delete' word.id %}" 
+                                      style="display: inline;">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                            onclick="return confirm('정말 삭제하시겠습니까?')">
+                                        삭제
+                                    </button>
+                                </form>
+                            </td>
+                            {% endif %}
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="{% if is_teacher %}6{% else %}5{% endif %}" class="text-center">
+                                등록된 단어가 없습니다.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    {% if page_obj.has_other_pages %}
+    <nav class="mt-4">
+        <ul class="pagination justify-content-center">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query }}{% endif %}{% if difficulty %}&difficulty={{ difficulty }}{% endif %}">
+                    이전
+                </a>
+            </li>
+            {% endif %}
+
+            {% for num in page_obj.paginator.page_range %}
+            <li class="page-item {% if page_obj.number == num %}active{% endif %}">
+                <a class="page-link" href="?page={{ num }}{% if query %}&q={{ query }}{% endif %}{% if difficulty %}&difficulty={{ difficulty }}{% endif %}">
+                    {{ num }}
+                </a>
+            </li>
+            {% endfor %}
+
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query }}{% endif %}{% if difficulty %}&difficulty={{ difficulty }}{% endif %}">
+                    다음
+                </a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
+</div>
+{% endblock %} 

@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+
+{% block title %}오늘의 단어 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4">오늘의 단어</h2>
+    
+    <div class="row">
+        {% for word in daily_words %}
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <div class="word-card">
+                        <h4>{{ word.english }}</h4>
+                        <p class="pronunciation">{{ word.pronunciation }}</p>
+                        <p class="korean-meaning">{{ word.korean }}</p>
+                        <p class="example"><small class="text-muted">{{ word.example_english }}</small></p>
+                        <p class="example-translation"><small class="text-muted">{{ word.example_korean }}</small></p>
+                    </div>
+                    <div class="mt-3">
+                        <form method="post" action="{% url 'study:word_progress_update' word.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="proficiency" value="1">
+                            <button type="submit" class="btn btn-sm btn-primary">학습 완료</button>
+                        </form>
+                        <form method="post" action="{% url 'study:bookmark_toggle' word.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                                {% if word in user.bookmarked_words.all %}
+                                    ★ 북마크 해제
+                                {% else %}
+                                    ☆ 북마크
+                                {% endif %}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12">
+            <div class="alert alert-info">
+                모든 단어를 학습하셨습니다! 복습을 통해 단어 실력을 더욱 향상시켜보세요.
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    
+    <div class="text-center mt-4">
+        <a href="{% url 'study:study_home' %}" class="btn btn-secondary">학습 홈으로</a>
+    </div>
+</div>
+
+<style>
+.word-card {
+    text-align: center;
+    margin-bottom: 1rem;
+}
+.pronunciation {
+    color: #6c757d;
+    font-style: italic;
+    margin-bottom: 0.5rem;
+}
+.korean-meaning {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+}
+.example {
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+}
+.example-translation {
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+</style>
+{% endblock %} 

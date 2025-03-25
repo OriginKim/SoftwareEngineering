@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}오답 노트 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4">오답 노트</h2>
+    
+    <div class="row">
+        {% for stats in word_stats %}
+        <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">{{ stats.word.english }}</h5>
+                        <span class="badge bg-danger">{{ stats.wrong_count }}회 틀림</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="pronunciation text-muted">{{ stats.word.pronunciation }}</p>
+                    <p class="korean-meaning">{{ stats.word.korean }}</p>
+                    
+                    {% if stats.word.example_english %}
+                    <div class="example-section mt-3">
+                        <p class="example-english">{{ stats.word.example_english }}</p>
+                        <p class="example-korean text-muted">{{ stats.word.example_korean }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    <div class="quiz-types mt-3">
+                        <small class="text-muted">틀린 퀴즈 유형:</small><br>
+                        {% for quiz_type in stats.quiz_types %}
+                        <span class="badge bg-info me-1">{{ quiz_type }}</span>
+                        {% endfor %}
+                    </div>
+                    
+                    <div class="last-attempt mt-2">
+                        <small class="text-muted">마지막 시도: {{ stats.last_attempt|date:"Y-m-d H:i" }}</small>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <div class="d-flex justify-content-between">
+                        <form method="post" action="{% url 'study:word_progress_update' stats.word.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <input type="hidden" name="proficiency" value="1">
+                            <button type="submit" class="btn btn-sm btn-primary">학습 시작</button>
+                        </form>
+                        <form method="post" action="{% url 'study:bookmark_toggle' stats.word.id %}" class="d-inline">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-warning">
+                                {% if stats.word in user.bookmarked_words.all %}
+                                    ★ 북마크 해제
+                                {% else %}
+                                    ☆ 북마크
+                                {% endif %}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12">
+            <div class="alert alert-info">
+                아직 틀린 문제가 없습니다. 퀴즈를 풀어보세요!
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<style>
+.pronunciation {
+    font-style: italic;
+    margin-bottom: 0.5rem;
+}
+.korean-meaning {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+}
+.example-section {
+    padding: 0.5rem;
+    background-color: #f8f9fa;
+    border-radius: 0.25rem;
+}
+.example-english {
+    margin-bottom: 0.25rem;
+}
+.example-korean {
+    font-size: 0.9rem;
+    margin-bottom: 0;
+}
+</style>
+{% endblock %} 

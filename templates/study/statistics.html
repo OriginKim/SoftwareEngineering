@@ -1,0 +1,202 @@
+{% extends 'base.html' %}
+{% load study_extras %}
+
+{% block title %}학습 통계 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-10 mx-auto">
+            <!-- 전체 학습 현황 -->
+            <div class="row mb-4">
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h6 class="text-muted mb-2">총 학습 단어</h6>
+                            <h2 class="mb-0">{{ total_words_studied }}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h6 class="text-muted mb-2">완벽히 암기</h6>
+                            <h2 class="mb-0">{{ mastered_words }}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h6 class="text-muted mb-2">복습 필요</h6>
+                            <h2 class="mb-0">{{ needs_review }}</h2>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h6 class="text-muted mb-2">학습 시간</h6>
+                            <h2 class="mb-0">{{ total_study_hours }}h</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 학습 진도 그래프 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">주간 학습 현황</h5>
+                </div>
+                <div class="card-body">
+                    <canvas id="weeklyProgress" height="100"></canvas>
+                </div>
+            </div>
+
+            <!-- 숙련도 분포 -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h5 class="mb-0">숙련도 분포</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="proficiencyDistribution"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card h-100">
+                        <div class="card-header">
+                            <h5 class="mb-0">학습 시간대</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="studyTimeDistribution"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 최근 학습 기록 -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">최근 학습 기록</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>날짜</th>
+                                    <th>학습 유형</th>
+                                    <th>학습한 단어</th>
+                                    <th>평균 숙련도</th>
+                                    <th>학습 시간</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for session in recent_sessions %}
+                                <tr>
+                                    <td>{{ session.start_time|date:"Y/m/d H:i" }}</td>
+                                    <td>{{ session.get_study_type_display }}</td>
+                                    <td>{{ session.words_studied.count }}개</td>
+                                    <td>
+                                        <div class="progress" style="height: 20px;">
+                                            <div class="progress-bar bg-{{ session.avg_proficiency|proficiency_color }}"
+                                                 role="progressbar"
+                                                 style="width: {{ session.avg_proficiency|multiply:20 }}%">
+                                                {{ session.avg_proficiency|floatformat:1 }}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>{{ session.duration }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // 주간 학습 현황 그래프
+    const weeklyCtx = document.getElementById('weeklyProgress').getContext('2d');
+    new Chart(weeklyCtx, {
+        type: 'line',
+        data: {
+            labels: {{ weekly_labels|safe }},
+            datasets: [{
+                label: '학습한 단어',
+                data: {{ weekly_words_data|safe }},
+                borderColor: 'rgb(75, 192, 192)',
+                tension: 0.1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+
+    // 숙련도 분포 그래프
+    const proficiencyCtx = document.getElementById('proficiencyDistribution').getContext('2d');
+    new Chart(proficiencyCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['처음 봤어요', '어려워요', '복습이 필요해요', '알 것 같아요', '완전히 알아요'],
+            datasets: [{
+                data: {{ proficiency_distribution|safe }},
+                backgroundColor: [
+                    '#dc3545',
+                    '#ffc107',
+                    '#17a2b8',
+                    '#007bff',
+                    '#28a745'
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
+
+    // 학습 시간대 분포
+    const timeCtx = document.getElementById('studyTimeDistribution').getContext('2d');
+    new Chart(timeCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ time_labels|safe }},
+            datasets: [{
+                label: '학습 횟수',
+                data: {{ time_distribution|safe }},
+                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                borderColor: 'rgb(54, 162, 235)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+</script>
+{% endblock %} 

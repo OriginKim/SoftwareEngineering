@@ -1,0 +1,21 @@
+sw_wordtest/
+├── requirements.txt          # 프로젝트 의존성 파일
+├── README.md                # 프로젝트 설명 문서
+├── manage.py                # Django 프로젝트 관리 스크립트
+├── config/                  # 프로젝트 설정 디렉토리
+│   ├── __init__.py
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── apps/                    # 애플리케이션 디렉토리
+│   ├── accounts/           # 사용자 계정 관리 앱
+│   ├── vocabulary/         # 단어 관리 앱
+│   ├── quiz/              # 퀴즈 및 테스트 앱
+│   └── study/             # 학습 관리 앱
+├── static/                 # 정적 파일 디렉토리
+│   ├── css/
+│   ├── js/
+│   └── images/
+└── templates/              # 템플릿 디렉토리
+    ├── base.html
+    └── components/ 

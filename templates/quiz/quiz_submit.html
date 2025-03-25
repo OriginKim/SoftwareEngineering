@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ quiz.title }} 풀이 중 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <!-- 진행 상황 -->
+            <div class="progress mb-4" style="height: 30px;">
+                <div class="progress-bar" role="progressbar" 
+                     style="width: {% widthratio question_number total_questions 100 %}%"
+                     aria-valuenow="{{ question_number }}" 
+                     aria-valuemin="0" 
+                     aria-valuemax="{{ total_questions }}">
+                    {{ question_number }}/{{ total_questions }}
+                </div>
+            </div>
+
+            <!-- 문제 -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="h4 mb-0">문제 {{ question_number }}</h2>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="{% url 'quiz:quiz_submit' quiz.id %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="question_id" value="{{ question.id }}">
+                        <input type="hidden" name="end_time" value="{{ end_time }}">
+                        
+                        {% if quiz.quiz_type == 'en_to_ko' %}
+                            <p class="h3 mb-4">{{ question.word.english }}</p>
+                            <div class="mb-3">
+                                <label for="answer" class="form-label">한글 뜻을 입력하세요</label>
+                                <input type="text" class="form-control form-control-lg" id="answer" name="answer" required autofocus>
+                            </div>
+                        {% else %}
+                            <p class="h3 mb-4">{{ question.word.korean }}</p>
+                            <div class="mb-3">
+                                <label for="answer" class="form-label">영단어를 입력하세요</label>
+                                <input type="text" class="form-control form-control-lg" id="answer" name="answer" required autofocus>
+                            </div>
+                        {% endif %}
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">다음</button>
+                            <a href="{% url 'quiz:quiz_detail' quiz.id %}" 
+                               class="btn btn-outline-danger"
+                               onclick="return confirm('정말 퀴즈를 중단하시겠습니까?');">
+                                퀴즈 중단
+                            </a>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if end_time %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const endTime = new Date('{{ end_time|date:"c" }}');
+    
+    function updateTimer() {
+        const now = new Date();
+        const timeLeft = endTime - now;
+        
+        if (timeLeft <= 0) {
+            document.querySelector('form').submit();
+            return;
+        }
+        
+        setTimeout(updateTimer, 1000);
+    }
+    
+    updateTimer();
+});
+</script>
+{% endif %}
+{% endblock %} 

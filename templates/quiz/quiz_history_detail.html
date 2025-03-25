@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+
+{% block title %}퀴즈 응시 기록 상세 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h2>퀴즈 응시 기록 상세</h2>
+               
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h3 class="card-title">{{ attempt.quiz.title }}</h3>
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <p><strong>응시 일시:</strong> {{ attempt.started_at|date:"Y-m-d H:i" }}</p>
+                            <p><strong>완료 일시:</strong> {{ attempt.completed_at|date:"Y-m-d H:i" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>총 문제:</strong> {{ attempt.total_questions }}문제</p>
+                            <p><strong>정답:</strong> {{ attempt.correct_answers }}개</p>
+                            <p><strong>점수:</strong> {{ attempt.score }}점</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">문제별 결과</h4>
+                </div>
+                <div class="card-body">
+                    {% for answer in answer_history %}
+                    <div class="answer-item mb-4 p-3 {% if answer.is_correct %}bg-success-subtle{% else %}bg-danger-subtle{% endif %} rounded">
+                        <h5 class="mb-3">문제 {{ forloop.counter }}</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                {% if attempt.quiz.quiz_type == 'en_to_ko' %}
+                                    <p class="mb-2"><strong>영어:</strong> {{ answer.question.word.english }}</p>
+                                    <p class="mb-2"><strong>정답:</strong> {{ answer.question.word.korean }}</p>
+                                {% else %}
+                                    <p class="mb-2"><strong>한글:</strong> {{ answer.question.word.korean }}</p>
+                                    <p class="mb-2"><strong>정답:</strong> {{ answer.question.word.english }}</p>
+                                {% endif %}
+                                <p class="mb-2"><strong>내 답변:</strong> {{ answer.user_answer }}</p>
+                            </div>
+                            <div class="col-md-6 d-flex align-items-center justify-content-end">
+                                {% if answer.is_correct %}
+                                <div class="text-success">
+                                    <i class="bi bi-check-circle-fill"></i> 정답
+                                </div>
+                                {% else %}
+                                <div class="text-danger">
+                                    <i class="bi bi-x-circle-fill"></i> 오답
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="text-center mt-4">
+                <a href="{% url 'quiz:quiz_home' %}" class="btn btn-outline-secondary">퀴즈 홈으로</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

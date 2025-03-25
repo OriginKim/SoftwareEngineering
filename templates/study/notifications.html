@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+
+{% block title %}알림 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h2 class="mb-4">알림</h2>
+            
+            {% if notifications %}
+                <div class="d-flex justify-content-end mb-3">
+                    <form action="{% url 'study:notification_mark_all_read' %}" method="post" class="me-2">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-primary">모두 읽음 표시</button>
+                    </form>
+                    <form action="{% url 'study:notification_delete_all' %}" method="post">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger" onclick="return confirm('모든 알림을 삭제하시겠습니까?')">모두 삭제</button>
+                    </form>
+                </div>
+
+                <div class="list-group">
+                    {% for notification in notifications %}
+                        <div class="list-group-item {% if not notification.is_read %}list-group-item-info{% endif %}">
+                            <div class="d-flex w-100 justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="mb-1">{{ notification.title }}</h5>
+                                    <p class="mb-1">{{ notification.message }}</p>
+                                    <small class="text-muted">{{ notification.created_at|date:"Y-m-d H:i" }}</small>
+                                </div>
+                                <div class="btn-group">
+                                    {% if not notification.is_read %}
+                                        <form action="{% url 'study:notification_mark_read' notification.id %}" method="post">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-outline-primary">읽음</button>
+                                        </form>
+                                    {% endif %}
+                                    {% if notification.link %}
+                                        <a href="{{ notification.link }}" class="btn btn-sm btn-outline-secondary ms-1">이동</a>
+                                    {% endif %}
+                                    <form action="{% url 'study:notification_delete' notification.id %}" method="post">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-sm btn-outline-danger ms-1" onclick="return confirm('이 알림을 삭제하시겠습니까?')">삭제</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    새로운 알림이 없습니다.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %} 

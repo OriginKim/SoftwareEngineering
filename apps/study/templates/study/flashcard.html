@@ -1,0 +1,28 @@
+{% extends 'base.html' %}
+
+{% block title %}플래시카드 학습 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h2 class="h4 mb-0">플래시카드 학습</h2>
+                </div>
+                <div class="card-body text-center">
+                    <div class="alert alert-info">
+                        <p class="mb-0">플래시카드 학습 기능은 현재 개발 중입니다.</p>
+                        <p class="mb-0">곧 서비스될 예정이니 조금만 기다려주세요!</p>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{% url 'study:plan_detail' plan.id %}" class="btn btn-secondary">
+                        학습 계획으로 돌아가기
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

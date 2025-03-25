@@ -1,0 +1,162 @@
+{% extends 'base.html' %}
+
+{% block title %}복습 학습 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <div class="row">
+        <div class="col-lg-8 mx-auto">
+            <!-- 복습 개요 -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h2 class="h4 mb-3">오늘의 복습</h2>
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <div class="h2 mb-2">{{ schedules|length }}</div>
+                            <p class="text-muted mb-0">복습할 단어</p>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="h2 mb-2" id="completed-count">0</div>
+                            <p class="text-muted mb-0">완료한 단어</p>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="h2 mb-2" id="remaining-count">{{ schedules|length }}</div>
+                            <p class="text-muted mb-0">남은 단어</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {% if schedules %}
+                <!-- 복습 카드 -->
+                <div id="review-cards">
+                    {% for schedule in schedules %}
+                        <div class="card mb-4 review-card" data-schedule-id="{{ schedule.id }}">
+                            <div class="card-body">
+                                <div class="word-section mb-4">
+                                    <h3 class="english-word mb-2">{{ schedule.word.english }}</h3>
+                                    <p class="korean-meaning mb-3" style="display: none;">
+                                        {{ schedule.word.korean }}
+                                    </p>
+                                    <button class="btn btn-outline-primary btn-sm show-meaning-btn"
+                                            onclick="toggleMeaning(this)">
+                                        뜻 보기
+                                    </button>
+                                </div>
+
+                                <div class="example-section mb-4" style="display: none;">
+                                    <h5 class="h6 text-muted">예문</h5>
+                                    <p class="mb-0">{{ schedule.word.example|default:"예문이 없습니다." }}</p>
+                                </div>
+
+                                <div class="review-options">
+                                    <p class="mb-2">이 단어를 얼마나 잘 기억하시나요?</p>
+                                    <div class="btn-group d-flex" role="group">
+                                        <button type="button" class="btn btn-outline-danger flex-fill"
+                                                onclick="updateReview({{ schedule.id }}, 1)">
+                                            기억 안남
+                                        </button>
+                                        <button type="button" class="btn btn-outline-warning flex-fill"
+                                                onclick="updateReview({{ schedule.id }}, 2)">
+                                            애매함
+                                        </button>
+                                        <button type="button" class="btn btn-outline-success flex-fill"
+                                                onclick="updateReview({{ schedule.id }}, 3)">
+                                            잘 기억남
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <!-- 복습 완료 카드 -->
+                <div class="card text-center" id="completion-card" style="display: none;">
+                    <div class="card-body py-5">
+                        <h3 class="mb-3">오늘의 복습을 완료했습니다! 🎉</h3>
+                        <p class="text-muted mb-4">
+                            내일도 꾸준한 복습으로 단어를 완벽하게 익혀보세요.
+                        </p>
+                        <div class="d-grid gap-2 col-6 mx-auto">
+                            <a href="{% url 'study:plan_list' %}" class="btn btn-primary">
+                                학습 계획으로 돌아가기
+                            </a>
+                            <a href="{% url 'study:progress' %}" class="btn btn-outline-primary">
+                                학습 진도 확인하기
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% else %}
+                <!-- 복습할 단어 없음 -->
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        <h3 class="mb-3">오늘은 복습할 단어가 없습니다!</h3>
+                        <p class="text-muted mb-4">
+                            지금까지 학습한 단어들을 잘 기억하고 계시네요.<br>
+                            새로운 단어를 학습해보는 건 어떨까요?
+                        </p>
+                        <div class="d-grid gap-2 col-6 mx-auto">
+                            <a href="{% url 'study:plan_list' %}" class="btn btn-primary">
+                                새 단어 학습하기
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let completedCount = 0;
+    let totalCount = {{ schedules|length }};
+
+    function updateCounts() {
+        document.getElementById('completed-count').textContent = completedCount;
+        document.getElementById('remaining-count').textContent = totalCount - completedCount;
+        
+        if (completedCount === totalCount) {
+            document.getElementById('review-cards').style.display = 'none';
+            document.getElementById('completion-card').style.display = 'block';
+        }
+    }
+
+    function toggleMeaning(button) {
+        const card = button.closest('.review-card');
+        const meaning = card.querySelector('.korean-meaning');
+        const example = card.querySelector('.example-section');
+        
+        if (meaning.style.display === 'none') {
+            meaning.style.display = 'block';
+            example.style.display = 'block';
+            button.textContent = '뜻 숨기기';
+        } else {
+            meaning.style.display = 'none';
+            example.style.display = 'none';
+            button.textContent = '뜻 보기';
+        }
+    }
+
+    function updateReview(scheduleId, status) {
+        fetch(`{% url 'study:review_schedule_update' 0 %}`.replace('0', scheduleId), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value
+            },
+            body: `status=completed`
+        }).then(response => {
+            if (response.ok) {
+                const card = document.querySelector(`[data-schedule-id="${scheduleId}"]`);
+                card.style.display = 'none';
+                completedCount++;
+                updateCounts();
+            }
+        });
+    }
+</script>
+{% endblock %} 

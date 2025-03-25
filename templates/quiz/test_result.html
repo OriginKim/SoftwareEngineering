@@ -1,0 +1,67 @@
+{% extends 'base.html' %}
+
+{% block title %}테스트 결과 - TOEIC 단어 학습{% endblock %}
+
+{% block content %}
+<div class="container py-4">
+    <h2 class="mb-4">테스트 결과</h2>
+    
+    <div class="row">
+        <div class="col-md-8 mx-auto">
+            <div class="card mb-4">
+                <div class="card-body text-center">
+                    <h3 class="mb-3">총점: {{ score }}점</h3>
+                    <p class="mb-2">맞은 문제: {{ correct_count }}개</p>
+                    <p class="mb-2">틀린 문제: {{ wrong_count }}개</p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar bg-success" 
+                             role="progressbar" 
+                             style="width: {{ score }}%" 
+                             aria-valuenow="{{ score }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="100">
+                            {{ score }}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">문제별 결과</h4>
+                </div>
+                <div class="card-body">
+                    {% for answer in answers %}
+                    <div class="answer-item mb-4 p-3 {% if answer.is_correct %}bg-success-subtle{% else %}bg-danger-subtle{% endif %} rounded">
+                        <h5 class="mb-3">문제 {{ forloop.counter }}</h5>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p class="mb-2"><strong>문제:</strong> {{ answer.question }}</p>
+                                <p class="mb-2"><strong>정답:</strong> {{ answer.correct_answer }}</p>
+                                <p class="mb-2"><strong>내 답변:</strong> {{ answer.user_answer }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                {% if answer.is_correct %}
+                                <div class="text-success">
+                                    <i class="bi bi-check-circle-fill"></i> 정답
+                                </div>
+                                {% else %}
+                                <div class="text-danger">
+                                    <i class="bi bi-x-circle-fill"></i> 오답
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="text-center mt-4">
+                <a href="{% url 'quiz:word_test' %}" class="btn btn-primary me-2">다시 테스트하기</a>
+                <a href="{% url 'quiz:quiz_home' %}" class="btn btn-outline-secondary">테스트 홈으로</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 
