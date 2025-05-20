@@ -1,186 +1,141 @@
 {% extends 'base.html' %}
+{% load static %}
 
 {% block title %}{{ plan.title }} - TOEIC 단어 학습{% endblock %}
 
 {% block content %}
-<div class="container py-4">
-    <div class="row">
-        <div class="col-lg-8 mx-auto">
-            <!-- 학습 계획 정보 -->
-            <div class="card mb-4">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h1 class="h3 mb-0">{{ plan.title }}</h1>
-                        <div>
-                            <span class="badge {% if plan.is_active %}bg-primary{% else %}bg-secondary{% endif %} me-2">
-                                {{ plan.is_active|yesno:"활성,비활성" }}
-                            </span>
-                            <div class="btn-group">
-                                <a href="{% url 'study:plan_edit' plan.id %}" 
-                                   class="btn btn-sm btn-outline-primary">
-                                    수정
-                                </a>
-                                <a href="{% url 'study:plan_delete' plan.id %}" 
-                                   class="btn btn-sm btn-outline-danger">
-                                    삭제
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                    <p class="text-muted mb-2">
-                        생성일: {{ plan.created_at|date:"Y년 m월 d일" }}
-                    </p>
-                    <p class="mb-3">
-                        일일 목표: {{ plan.target_words_per_day }}개 단어
-                    </p>
-                    
-                    <!-- 학습 진행 상황 -->
-                    <div class="progress mb-3">
-                        <div class="progress-bar" role="progressbar" 
-                             style="width: {{ plan.get_progress_percentage }}%"
-                             aria-valuenow="{{ plan.get_progress_percentage }}" 
-                             aria-valuemin="0" aria-valuemax="100">
-                            {{ plan.get_progress_percentage }}%
-                        </div>
-                    </div>
-                    <div class="row text-center">
-                        <div class="col">
-                            <h5 class="h6 text-muted">학습한 단어</h5>
-                            <p class="h4">{{ plan.get_studied_words_count }}개</p>
-                        </div>
-                        <div class="col">
-                            <h5 class="h6 text-muted">남은 단어</h5>
-                            <p class="h4">{{ plan.get_remaining_words_count }}개</p>
-                        </div>
-                        <div class="col">
-                            <h5 class="h6 text-muted">평균 숙련도</h5>
-                            <p class="h4">{{ plan.get_average_proficiency|floatformat:1 }}/5</p>
-                        </div>
-                    </div>
+<div class="container">
+    <div class="row mb-4">
+        <div class="col">
+            <h2>{{ plan.title }}</h2>
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <p class="mb-0">목표: 하루 {{ plan.target_words_per_day }}개 단어, {{ plan.target_study_time }}분 학습</p>
                 </div>
-            </div>
-
-            <!-- 학습 시작 버튼 -->
-            <div class="card mb-4">
-                <div class="card-body text-center">
-                    <h2 class="h4 mb-3">학습 시작하기</h2>
-                    <form action="{% url 'study:session_start' %}" method="post" class="d-inline">
-                        {% csrf_token %}
-                        <input type="hidden" name="plan_id" value="{{ plan.id }}">
-                        <div class="btn-group">
-                            <button type="submit" name="study_type" value="flashcard" 
-                                    class="btn btn-primary">
-                                <i class="fas fa-clone"></i> 플래시카드
-                            </button>
-                            <button type="submit" name="study_type" value="word_list" 
-                                    class="btn btn-success">
-                                <i class="fas fa-list"></i> 단어장
-                            </button>
-                            <button type="submit" name="study_type" value="review" 
-                                    class="btn btn-info">
-                                <i class="fas fa-redo"></i> 복습
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- 학습 세션 기록 -->
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h2 class="h5 mb-0">학습 기록</h2>
-                    <div class="btn-group">
-                        <button class="btn btn-sm btn-outline-secondary" onclick="filterSessions('all')">전체</button>
-                        <button class="btn btn-sm btn-outline-primary" onclick="filterSessions('flashcard')">플래시카드</button>
-                        <button class="btn btn-sm btn-outline-success" onclick="filterSessions('word_list')">단어장</button>
-                        <button class="btn btn-sm btn-outline-info" onclick="filterSessions('review')">복습</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    {% if sessions %}
-                        <div class="table-responsive">
-                            <table class="table">
-                                <thead>
-                                    <tr>
-                                        <th>날짜</th>
-                                        <th>학습 유형</th>
-                                        <th>학습 시간</th>
-                                        <th>학습한 단어</th>
-                                        <th>평균 숙련도</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for session in sessions %}
-                                    <tr class="session-row" data-type="{{ session.study_type }}">
-                                        <td>{{ session.start_time|date:"Y/m/d H:i" }}</td>
-                                        <td>
-                                            <span class="badge {% if session.study_type == 'flashcard' %}bg-primary
-                                                             {% elif session.study_type == 'word_list' %}bg-success
-                                                             {% else %}bg-info{% endif %}">
-                                                {{ session.get_study_type_display }}
-                                            </span>
-                                        </td>
-                                        <td>
-                                            {% if session.end_time %}
-                                                {{ session.get_duration_display }}
-                                            {% else %}
-                                                <span class="badge bg-warning">진행 중</span>
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ session.get_studied_words_count }}개</td>
-                                        <td>
-                                            <div class="progress" style="height: 20px;">
-                                                <div class="progress-bar" role="progressbar"
-                                                     style="width: {{ session.get_average_proficiency|multiply:20 }}%"
-                                                     aria-valuenow="{{ session.get_average_proficiency }}"
-                                                     aria-valuemin="0" aria-valuemax="5">
-                                                    {{ session.get_average_proficiency|floatformat:1 }}/5
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td>
-                                            <a href="{% url 'study:session_detail' session.id %}" 
-                                               class="btn btn-sm btn-outline-primary">
-                                                상세
-                                            </a>
-                                            {% if not session.end_time %}
-                                            <form action="{% url 'study:session_end' session.id %}" 
-                                                  method="post" class="d-inline">
-                                                {% csrf_token %}
-                                                <button type="submit" class="btn btn-sm btn-outline-warning">
-                                                    종료
-                                                </button>
-                                            </form>
-                                            {% endif %}
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    {% else %}
-                        <div class="text-center py-4">
-                            <p class="text-muted mb-0">아직 학습 기록이 없습니다.</p>
-                            <p class="text-muted">위의 '학습 시작하기' 버튼을 눌러 학습을 시작해보세요!</p>
-                        </div>
-                    {% endif %}
+                <div class="text-end">
+                    <a href="{% url 'study:plan_edit' plan.id %}" class="btn btn-sm btn-outline-primary">
+                        <i class="fas fa-edit"></i> 수정
+                    </a>
+                    <a href="{% url 'study:plan_delete' plan.id %}" class="btn btn-sm btn-outline-danger">
+                        <i class="fas fa-trash"></i> 삭제
+                    </a>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
+    <div class="row mb-4">
+        <div class="col-md-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">오늘의 학습 현황</h5>
+                    <p class="card-text">
+                        <i class="fas fa-clock"></i> 학습 시간: <span id="total-study-time">{{ total_study_time }}분</span><br>
+                        <i class="fas fa-book"></i> 학습한 단어: {{ today_words_count }}개
+                    </p>
+                    <div class="progress mb-3">
+                        <div class="progress-bar" role="progressbar" 
+                             style="width: {% widthratio total_study_time plan.target_study_time 100 %}%"
+                             aria-valuenow="{{ total_study_time }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="{{ plan.target_study_time }}">
+                        </div>
+                    </div>
+                    <div class="progress">
+                        <div class="progress-bar bg-success" role="progressbar" 
+                             style="width: {% widthratio today_words_count plan.target_words_per_day 100 %}%"
+                             aria-valuenow="{{ today_words_count }}" 
+                             aria-valuemin="0" 
+                             aria-valuemax="{{ plan.target_words_per_day }}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-8">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">학습 시작하기</h5>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <a href="{% url 'study:flashcard_study' plan.id %}" class="btn btn-primary btn-lg w-100 mb-3">
+                                <i class="fas fa-clone"></i><br>플래시카드
+                            </a>
+                        </div>
+                        <div class="col-md-4">
+                            <a href="{% url 'study:vocabulary_study' plan.id %}" class="btn btn-success btn-lg w-100 mb-3">
+                                <i class="fas fa-book"></i><br>단어장
+                            </a>
+                        </div>
+                        <div class="col-md-4">
+                            <a href="{% url 'study:review_study' plan.id %}" class="btn btn-warning btn-lg w-100 mb-3">
+                                <i class="fas fa-redo"></i><br>복습
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if review_words %}
+    <div class="row">
+        <div class="col">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">복습이 필요한 단어</h5>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>영어</th>
+                                    <th>한글</th>
+                                    <th>예문</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for word in review_words %}
+                                <tr>
+                                    <td>{{ word.english }}</td>
+                                    <td>{{ word.korean }}</td>
+                                    <td>
+                                        <small class="text-muted">{{ word.example_sentence }}</small><br>
+                                        <small class="text-muted">{{ word.example_translation }}</small>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-function filterSessions(type) {
-    const rows = document.querySelectorAll('.session-row');
-    rows.forEach(row => {
-        if (type === 'all' || row.dataset.type === type) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
-    });
-}
+    // 1분마다 통계 업데이트
+    setInterval(() => {
+        fetch("{% url 'study:stats_api' plan.id %}")
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('total-study-time').textContent = data.total_study_time + '분';
+                
+                // 프로그레스 바 업데이트
+                const timeBar = document.querySelector('.progress-bar');
+                const timePercent = (data.total_study_time / {{ plan.target_study_time }}) * 100;
+                timeBar.style.width = timePercent + '%';
+                timeBar.setAttribute('aria-valuenow', data.total_study_time);
+                
+                const wordBar = document.querySelector('.progress-bar.bg-success');
+                const wordPercent = (data.today_words_count / {{ plan.target_words_per_day }}) * 100;
+                wordBar.style.width = wordPercent + '%';
+                wordBar.setAttribute('aria-valuenow', data.today_words_count);
+            });
+    }, 60000);
 </script>
 {% endblock %} 

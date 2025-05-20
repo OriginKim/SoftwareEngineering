@@ -27,6 +27,8 @@ urlpatterns = [
     path('study/', include('apps.study.urls')),  # 학습 관리
 ]
 
+
+
 # 개발 환경에서 미디어 파일 서빙
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

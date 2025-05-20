@@ -114,12 +114,6 @@
                            class="btn btn-secondary">
                             학습 계획으로 돌아가기
                         </a>
-                        {% if session.end_time %}
-                        <a href="{% url 'study:session_start' %}?plan_id={{ session.study_plan.id }}" 
-                           class="btn btn-primary">
-                            새 학습 시작
-                        </a>
-                        {% endif %}
                     </div>
                 </div>
             </div>

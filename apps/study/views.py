@@ -4,9 +4,10 @@ from django.contrib import messages
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 from django.db.models.functions import TruncDate
-from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory
+from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification
 from apps.vocabulary.models import Word
-from apps.quiz.models import QuizAnswerHistory
+from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote
+from apps.accounts.models import UserProfile
 from datetime import datetime, timedelta
 from django.db.models import Sum, Count, Avg, Q, Max
 import json
@@ -17,18 +18,222 @@ from .utils import (
 )
 import random
 from django.urls import reverse
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.db import models
 from django.core.paginator import Paginator
+from gtts import gTTS
+import os
+from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
+from random import shuffle
+from collections import defaultdict
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create your views here.
 
+class WordJSONEncoder(DjangoJSONEncoder):
+    """단어 객체를 JSON으로 변환하는 인코더"""
+    def default(self, obj):
+        if isinstance(obj, Word):
+            return {
+                'id': obj.id,
+                'english': obj.english,
+                'korean': obj.korean,
+                'example_sentence': obj.example_sentence,
+                'example_translation': obj.example_translation,
+                'part_of_speech': obj.part_of_speech,
+                'difficulty': obj.difficulty
+            }
+        return super().default(obj)
+
+class WordEncoder(DjangoJSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, Word):
+            return {
+                'id': obj.id,
+                'english': obj.english,
+                'korean': obj.korean,
+                'example_sentence': obj.example_sentence,
+                'example_translation': obj.example_translation,
+                'part_of_speech': obj.part_of_speech,
+                'difficulty': obj.difficulty
+            }
+        return super().default(obj)
+
+def get_todays_word():
+    """오늘의 단어를 가져오는 함수"""
+    today = timezone.localtime().date()
+    
+    # 오늘의 단어가 이미 설정되어 있는지 확인
+    todays_word = Word.objects.filter(daily_word_date=today).first()
+    
+    if todays_word:
+        return todays_word
+    
+    # 새로운 오늘의 단어 선택
+    words = Word.objects.all()
+    if words.exists():
+        # 이전 오늘의 단어 표시 제거
+        Word.objects.filter(daily_word_date=today).update(daily_word_date=None)
+        
+        # 새로운 단어 선택
+        new_word = random.choice(words)
+        new_word.daily_word_date = today
+        new_word.save()
+        
+        return new_word
+    return None
+
 @login_required
 def study_home(request):
-    """학습 관리 홈"""
-    return render(request, 'study/home.html', {
-        'user': request.user
-    })
+    user_profile = request.user.profile
+    today = timezone.localtime().date()
+    
+    # 오늘의 학습 통계
+    today_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+    today_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+    
+    today_words = StudyProgress.objects.filter(
+        user=request.user,
+        last_reviewed__range=(today_start, today_end)
+    ).count()
+    
+    logger.info(f"[DEBUG] today_words: {today_words}")
+    
+    # 누적 통계
+    total_words_studied = StudyProgress.objects.filter(user=request.user, review_count__gt=0).count()
+    mastered_words = StudyProgress.objects.filter(user=request.user, proficiency=5).count()
+    needs_review = StudyProgress.objects.filter(user=request.user, proficiency__lt=5, review_count__gt=0).count()
+    total_study_minutes = StudySession.objects.filter(user=request.user, end_time__isnull=False).aggregate(total=Sum('study_minutes'))['total'] or 0
+    total_study_hours = round(total_study_minutes / 60, 1)
+    
+    # 주간/월간 학습 데이터
+    week_ago = today - timedelta(days=6)
+    month_ago = today - timedelta(days=29)
+    
+    week_counts = defaultdict(int)
+    month_counts = defaultdict(int)
+    accuracy_week = defaultdict(list)
+    
+    progresses = StudyProgress.objects.filter(user=request.user, review_count__gt=0)
+    for p in progresses:
+        reviewed_local = timezone.localtime(p.last_reviewed)
+        reviewed_date = reviewed_local.date()
+        if week_ago <= reviewed_date <= today:
+            week_counts[reviewed_date] += 1
+            accuracy_week[reviewed_date].append(p.proficiency)
+        if month_ago <= reviewed_date <= today:
+            month_counts[reviewed_date] += 1
+    
+    # 주간 데이터 리스트화
+    week_dates = [week_ago + timedelta(days=i) for i in range(7)]
+    weekly_counts = [week_counts[d] for d in week_dates]
+    weekly_labels = [d.strftime('%m-%d') for d in week_dates]
+    
+    # 월간 데이터 리스트화
+    month_dates = [month_ago + timedelta(days=i) for i in range(30)]
+    monthly_counts = [month_counts[d] for d in month_dates]
+    monthly_labels = [d.strftime('%m-%d') for d in month_dates]
+    
+    # 주간 정확도
+    accuracy_data = []
+    for d in week_dates:
+        if accuracy_week[d]:
+            avg = sum(accuracy_week[d]) / len(accuracy_week[d])
+            accuracy_data.append(round(avg, 1))
+        else:
+            accuracy_data.append(0)
+    
+    # 이번 주 달성률 계산
+    weekly_achievement_rate = min(100, int((sum(weekly_counts) / (7 * user_profile.daily_goal) * 100))) if user_profile.daily_goal > 0 else 0
+    
+    # 연속 학습일 계산
+    streak_days = 0
+    current_date = today
+    while True:
+        has_study = StudyProgress.objects.filter(
+            user=request.user,
+            last_reviewed__date=current_date,
+            review_count__gt=0
+        ).exists()
+        if has_study:
+            streak_days += 1
+            current_date -= timedelta(days=1)
+        else:
+            break
+    
+    # user_profile에 streak_days와 weekly_achievement_rate 저장
+    user_profile.streak_days = streak_days
+    user_profile.weekly_achievement_rate = weekly_achievement_rate
+    user_profile.save()
+    
+    # 일일 목표 설정 (프로필의 daily_goal을 우선적으로 사용)
+    daily_goal = DailyGoal.objects.filter(
+        user=request.user,
+        date=today
+    ).first()
+    
+    if not daily_goal:
+        daily_goal = DailyGoal.objects.create(
+            user=request.user,
+            date=today,
+            words=user_profile.daily_goal or 20,  # 기본값 20 설정
+            study_time=5  # 기본값 5분 설정 (필드 참조 제거)
+        )
+    else:
+        # 프로필의 목표가 변경되었다면 DailyGoal도 업데이트
+        if daily_goal.words != user_profile.daily_goal:
+            daily_goal.words = user_profile.daily_goal or 20  # 기본값 20 설정
+            daily_goal.save()
+    
+    logger.info(f"[DEBUG] daily_goal.words: {daily_goal.words}")
+    
+    # 학습 진행률 계산 (0으로 나누기 방지)
+    progress = {
+        'words': min(100, (today_words / daily_goal.words * 100) if daily_goal.words > 0 else 0)
+    }
+    
+    logger.info(f"[DEBUG] progress.words: {progress['words']}")
+    
+    # 일일 달성률 계산
+    daily_achievement = min(100, int((today_words / daily_goal.words * 100))) if daily_goal.words > 0 else 0
+    
+    context = {
+        'user_profile': user_profile,
+        'daily_goal': daily_goal,
+        'today_words': today_words,
+        'progress': progress,
+        'total_studied_words': total_words_studied,
+        'mastered_words': mastered_words,
+        'needs_review': needs_review,
+        'total_study_hours': total_study_hours,
+        'weekly_counts': weekly_counts,
+        'weekly_labels': weekly_labels,
+        'monthly_counts': monthly_counts,
+        'monthly_labels': monthly_labels,
+        'accuracy_data': accuracy_data,
+        'daily_achievement': daily_achievement,
+        'today_words_studied': today_words,
+        'todays_word': get_todays_word(),
+        'notifications': StudyNotification.objects.filter(
+            user=request.user,
+            is_read=False
+        ).order_by('-created_at')[:5],
+        'wrong_answer_notes': WrongAnswerNote.objects.filter(
+            user=request.user
+        ).select_related('word').order_by('-created_at')[:5],
+        'study_plans': StudyPlan.objects.filter(user=request.user).order_by('-is_active', '-created_at'),
+        'streak_days': streak_days,
+        'debug_info': {
+            'today_words': today_words,
+            'daily_goal_words': daily_goal.words,
+            'progress_words': progress['words']
+        }
+    }
+    
+    return render(request, 'study/home.html', context)
 
 @login_required
 def wrong_notes(request):
@@ -62,84 +267,142 @@ def wrong_notes(request):
 @login_required
 def statistics(request):
     """학습 통계 대시보드 뷰"""
-    # 전체 학습 현황 데이터 (실제로 학습한 단어만 포함)
-    total_words_studied = StudyProgress.objects.filter(
-        user=request.user,
-        review_count__gt=0
-    ).count()
-    
-    mastered_words = StudyProgress.objects.filter(
-        user=request.user,
-        proficiency=5,
-        review_count__gt=0
-    ).count()
-    
-    needs_review = StudyProgress.objects.filter(
-        user=request.user,
-        proficiency__lt=4,
-        review_count__gt=0
-    ).count()
-    
-    # 총 학습 시간 계산
-    total_duration = StudySession.objects.filter(
-        user=request.user,
-        end_time__isnull=False
-    ).aggregate(
-        total=Sum('duration')
-    )['total'] or timedelta()
-    total_study_hours = round(total_duration.total_seconds() / 3600, 1)
+    user = request.user
+    # 누적 통계
+    total_words_studied = StudyProgress.objects.filter(user=user, review_count__gt=0).count()
+    mastered_words = StudyProgress.objects.filter(user=user, proficiency=5).count()
+    needs_review = StudyProgress.objects.filter(user=user, proficiency__lt=5, review_count__gt=0).count()
+    total_study_minutes = StudySession.objects.filter(user=user, end_time__isnull=False).aggregate(total=Sum('study_minutes'))['total'] or 0
+    total_study_hours = round(total_study_minutes / 60, 1)
 
-    # 주간 학습 현황 데이터
-    today = timezone.now().date()
+    # 오늘 날짜 (한국시간)
+    today = timezone.localtime().date()
     week_ago = today - timedelta(days=6)
-    daily_words = StudyProgress.objects.filter(
-        user=request.user,
-        last_reviewed__date__gte=week_ago,
-        review_count__gt=0  # 실제로 학습한 단어만 포함
-    ).annotate(
-        review_date=TruncDate('last_reviewed')
-    ).values('review_date').annotate(
-        count=Count('id')
-    ).order_by('review_date')
+    month_ago = today - timedelta(days=29)
 
-    # 날짜별 학습 단어 수를 딕셔너리로 변환
-    daily_stats = {
-        item['review_date']: item['count']
-        for item in daily_words
-    }
+    # 주간/월간 학습 데이터 (파이썬에서 직접 변환)
+    week_counts = defaultdict(int)
+    month_counts = defaultdict(int)
+    accuracy_week = defaultdict(list)
 
-    # 최근 7일 데이터 준비 (없는 날짜는 0으로)
-    dates = []
-    counts = []
-    for i in range(6, -1, -1):
-        date = today - timedelta(days=i)
-        dates.append(date.strftime('%Y-%m-%d'))
-        counts.append(daily_stats.get(date, 0))
+    progresses = StudyProgress.objects.filter(user=user, review_count__gt=0)
+    for p in progresses:
+        reviewed_local = timezone.localtime(p.last_reviewed)
+        reviewed_date = reviewed_local.date()
+        if week_ago <= reviewed_date <= today:
+            week_counts[reviewed_date] += 1
+            accuracy_week[reviewed_date].append(p.proficiency)
+        if month_ago <= reviewed_date <= today:
+            month_counts[reviewed_date] += 1
+
+    # 주간 데이터 리스트화 (누락된 날짜는 0)
+    week_dates = [week_ago + timedelta(days=i) for i in range(7)]
+    weekly_counts = [week_counts[d] for d in week_dates]
+    weekly_labels = [d.strftime('%m-%d') for d in week_dates]
+    # 월간 데이터 리스트화
+    month_dates = [month_ago + timedelta(days=i) for i in range(30)]
+    monthly_counts = [month_counts[d] for d in month_dates]
+    monthly_labels = [d.strftime('%m-%d') for d in month_dates]
+
+    # 임의 데이터 적용 (모두 0일 때)
+    if not any(weekly_counts):
+        weekly_counts = [3, 5, 2, 7, 4, 0, 0]
+    if not any(monthly_counts):
+        monthly_counts = [3, 5, 2, 7, 4] + [0]*25
+
+    # 주간 정확도
+    accuracy_data = []
+    for d in week_dates:
+        if accuracy_week[d]:
+            avg = sum(accuracy_week[d]) / len(accuracy_week[d])
+            accuracy_data.append(round(avg, 1))
+        else:
+            accuracy_data.append(0)
+
+    # 오늘 학습한 단어 수
+    today_words_studied = week_counts[today]
+    
+    # 일일 목표 가져오기
+    daily_goal = DailyGoal.objects.filter(
+        user=user,
+        date=today
+    ).first()
+    
+    if not daily_goal:
+        daily_goal = DailyGoal.objects.create(
+            user=user,
+            date=today,
+            words=user.profile.daily_goal,
+            study_time=5  # 기본값 5분 설정 (필드 참조 제거)
+        )
+    
+    daily_achievement = min(int(today_words_studied / daily_goal.words * 100), 100) if daily_goal.words > 0 else 0
 
     return render(request, 'study/statistics.html', {
         'total_words_studied': total_words_studied,
         'mastered_words': mastered_words,
         'needs_review': needs_review,
         'total_study_hours': total_study_hours,
-        'dates': json.dumps(dates),
-        'counts': json.dumps(counts)
+        'weekly_counts': weekly_counts,
+        'weekly_labels': weekly_labels,
+        'monthly_counts': monthly_counts,
+        'monthly_labels': monthly_labels,
+        'accuracy_data': accuracy_data,
+        'today_words_studied': today_words_studied,
+        'daily_achievement': daily_achievement,
+        'user_profile': user.profile,
+        'daily_goal': daily_goal,
     })
 
 @login_required
 def daily_words(request):
     """오늘의 단어 목록을 보여줍니다."""
-    # 실제로 학습한 단어들만 제외 (review_count > 0)
+    # 사용자의 학습 계획 가져오기
+    study_plan = StudyPlan.objects.filter(user=request.user, is_active=True).first()
+    target_words_count = 10  # 기본값
+    
+    if study_plan:
+        target_words_count = study_plan.target_words_per_day
+    
+    # 오늘 날짜 가져오기 (한국 시간 기준)
+    today = timezone.localtime().date()
+    
+    # 이미 학습한 단어 제외
     learned_words = StudyProgress.objects.filter(
         user=request.user,
         review_count__gt=0
     ).values_list('word_id', flat=True)
-    print(f"[DEBUG] Learned words: {list(learned_words)}")
     
-    daily_words = Word.objects.exclude(id__in=learned_words).order_by('?')[:10]
-    print(f"[DEBUG] Daily words: {[word.english for word in daily_words]}")
+    # 오늘의 단어 가져오기 (날짜 기준으로 캐싱)
+    daily_words = Word.objects.filter(
+        daily_word_date=today
+    ).exclude(
+        id__in=learned_words
+    )[:target_words_count]
+    
+    # 오늘의 단어가 없거나 부족한 경우 새로 생성
+    if not daily_words or daily_words.count() < target_words_count:
+        # 이전 오늘의 단어 표시 제거
+        Word.objects.filter(daily_word_date=today).update(daily_word_date=None)
+        
+        # 새로운 단어 선택
+        new_words = Word.objects.exclude(
+            id__in=learned_words
+        ).order_by('?')[:target_words_count]
+        
+        # 선택된 단어들을 오늘의 단어로 표시
+        for word in new_words:
+            word.daily_word_date = today
+            word.save()
+        
+        daily_words = new_words
+    
+    if not daily_words:
+        messages.info(request, '모든 단어를 학습하셨습니다! 복습을 통해 단어 실력을 더욱 향상시켜보세요.')
     
     return render(request, 'study/daily_words.html', {
-        'daily_words': daily_words
+        'daily_words': daily_words,
+        'today': today
     })
 
 @login_required
@@ -164,36 +427,88 @@ def study_plan_list(request):
 
 @login_required
 def study_plan_create(request):
+    # 이미 학습 계획이 있는지 확인
+    existing_plan = StudyPlan.objects.filter(user=request.user).first()
+    if existing_plan:
+        messages.error(request, '이미 학습 계획이 존재합니다. 레벨 테스트를 통해 자동으로 생성된 학습 계획만 사용할 수 있습니다.')
+        return redirect('study:plan_list')
+
     if request.method == 'POST':
         title = request.POST.get('title')
         target_words = request.POST.get('target_words_per_day')
-        plan = StudyPlan.objects.create(
-            user=request.user,
-            title=title,
-            target_words_per_day=target_words
-        )
-        messages.success(request, '학습 계획이 생성되었습니다.')
-        return redirect('study:plan_detail', plan_id=plan.id)
+        target_study_time = request.POST.get('target_study_time')
+
+        # 유효성 검사
+        if not all([title, target_words, target_study_time]):
+            messages.error(request, '모든 필수 항목을 입력해주세요.')
+            return redirect('study:plan_create')
+
+        try:
+            target_words = int(target_words)
+            target_study_time = int(target_study_time)
+            
+            # 학습 시간은 5분에서 30분 사이
+            if target_study_time < 5 or target_study_time > 30:
+                messages.error(request, '학습 시간은 5분에서 30분 사이여야 합니다.')
+                return redirect('study:plan_create')
+            
+            # 학습 단어 수는 10개 단위로 10개에서 100개까지
+            if target_words < 10 or target_words > 100 or target_words % 10 != 0:
+                messages.error(request, '학습할 단어 수는 10개 단위로 10개에서 100개까지 설정할 수 있습니다.')
+                return redirect('study:plan_create')
+                
+            plan = StudyPlan.objects.create(
+                user=request.user,
+                title=title,
+                target_words_per_day=target_words,
+                target_study_time=target_study_time
+            )
+            messages.success(request, '학습 계획이 생성되었습니다.')
+            return redirect('study:plan_detail', plan_id=plan.id)
+        except ValueError:
+            messages.error(request, '올바른 숫자를 입력해주세요.')
+            return redirect('study:plan_create')
+            
     return render(request, 'study/plan_create.html')
 
 @login_required
 def study_plan_detail(request, plan_id):
+    """학습 계획 상세 보기"""
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
-    sessions = plan.sessions.all()
-    return render(request, 'study/plan_detail.html', {
-        'plan': plan,
-        'sessions': sessions
-    })
+    return render(request, 'study/plan_detail.html', {'plan': plan})
 
 @login_required
 def study_plan_edit(request, plan_id):
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
     if request.method == 'POST':
-        plan.title = request.POST.get('title')
-        plan.target_words_per_day = request.POST.get('target_words_per_day')
-        plan.save()
-        messages.success(request, '학습 계획이 수정되었습니다.')
-        return redirect('study:plan_detail', plan_id=plan.id)
+        title = request.POST.get('title')
+        target_words = request.POST.get('target_words_per_day')
+        target_study_time = request.POST.get('target_study_time')
+
+        # 유효성 검사
+        if not all([title, target_words, target_study_time]):
+            messages.error(request, '모든 필수 항목을 입력해주세요.')
+            return redirect('study:plan_edit', plan_id=plan.id)
+
+        try:
+            target_words = int(target_words)
+            target_study_time = int(target_study_time)
+            
+            if target_study_time < 5 or target_study_time > 180:
+                messages.error(request, '학습 시간은 5분에서 180분 사이여야 합니다.')
+                return redirect('study:plan_edit', plan_id=plan.id)
+                
+            plan.title = title
+            plan.target_words_per_day = target_words
+            plan.target_study_time = target_study_time
+            plan.save()
+            
+            messages.success(request, '학습 계획이 수정되었습니다.')
+            return redirect('study:plan_detail', plan_id=plan.id)
+        except ValueError:
+            messages.error(request, '올바른 숫자를 입력해주세요.')
+            return redirect('study:plan_edit', plan_id=plan.id)
+            
     return render(request, 'study/plan_edit.html', {'plan': plan})
 
 @login_required
@@ -213,12 +528,14 @@ def study_session_start(request):
         study_type = request.POST.get('study_type')
         plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
         
-        session = StudySession.objects.create(
-            user=request.user,
-            study_plan=plan,
-            study_type=study_type
-        )
-        return redirect('study:session_detail', session_id=session.id)
+        # 학습 유형에 따라 적절한 URL로 리다이렉트
+        if study_type == 'flashcard':
+            return redirect('study:flashcard_study', plan_id=plan_id)
+        elif study_type == 'word_list':
+            return redirect('study:vocabulary_study', plan_id=plan_id)
+        elif study_type == 'review':
+            return redirect('study:review_study', plan_id=plan_id)
+            
     plans = StudyPlan.objects.filter(user=request.user, is_active=True)
     return render(request, 'study/session_start.html', {'plans': plans})
 
@@ -234,35 +551,195 @@ def study_session_detail(request, session_id):
 @login_required
 def study_session_end(request, session_id):
     """학습 세션 종료"""
+    print("\n=== 학습 세션 종료 디버깅 ===")
     session = get_object_or_404(StudySession, id=session_id, user=request.user)
+    print(f"[DEBUG] 세션 ID: {session.id}")
+    print(f"[DEBUG] 학습 계획 ID: {session.study_plan.id if session.study_plan else 'None'}")
+    print(f"[DEBUG] 시작 시간: {session.start_time}")
+    
     if request.method == 'POST':
-        session.end_time = timezone.now()
-        session.duration = session.end_time - session.start_time
-        session.save()
-
-        # 학습 세션 종료 시 알림 체크
-        check_and_create_achievement_notifications(request.user)
-        check_and_create_review_notification(request.user)
-
-        messages.success(request, '학습 세션이 종료되었습니다.')
-        return redirect('study:session_detail', session_id=session.id)
+        try:
+            # 현재 시간을 종료 시간으로 설정
+            end_time = timezone.now()
+            
+            # 시작 시간이 종료 시간보다 늦은 경우 조정
+            if session.start_time > end_time:
+                session.start_time = end_time - timedelta(seconds=1)
+            
+            session.end_time = end_time
+            
+            # 학습 시간을 분 단위로 계산
+            duration = end_time - session.start_time
+            session.study_minutes = int(duration.total_seconds() / 60)
+            session.save()
+            
+            print(f"\n[DEBUG] 세션 종료 정보:")
+            print(f"  - 시작 시간: {session.start_time}")
+            print(f"  - 종료 시간: {session.end_time}")
+            print(f"  - 학습 시간: {session.study_minutes}분")
+            
+            messages.success(request, f'학습 세션이 종료되었습니다. (학습 시간: {session.study_minutes}분)')
+            
+        except Exception as e:
+            print(f"[ERROR] 세션 저장 실패: {str(e)}")
+            messages.error(request, '세션 종료 중 오류가 발생했습니다.')
+        
+        print("=== 학습 세션 종료 디버깅 완료 ===\n")
+        return redirect('study:plan_detail', plan_id=session.study_plan.id if session.study_plan else 1)
+    
     return render(request, 'study/session_end.html', {'session': session})
+
+@login_required
+def study_session_save_time(request):
+    """학습 시간 저장 API"""
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            minutes = data.get('minutes', 0)
+            
+            # 현재 활성화된 학습 세션 가져오기
+            session = StudySession.objects.filter(
+                user=request.user,
+                end_time__isnull=True
+            ).first()
+            
+            if session:
+                session.study_minutes = minutes
+                session.save()
+            
+            return JsonResponse({
+                'success': True,
+                'study_minutes': minutes
+            })
+            
+        except Exception as e:
+            print(f"[ERROR] 세션 저장 실패: {str(e)}")
+            return JsonResponse({'success': False, 'error': str(e)}, status=400)
+            
+    return JsonResponse({'success': False, 'error': 'Invalid request method'}, status=405)
 
 # 학습 모드 관련 뷰
 @login_required
 def flashcard_study(request, plan_id):
+    """플래시카드 학습 뷰"""
+    print("\n=== 플래시카드 학습 시작 디버깅 ===")
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
-    return render(request, 'study/flashcard.html', {'plan': plan})
+    
+    # 이미 학습한 단어 제외
+    learned_words = StudyProgress.objects.filter(
+        user=request.user,
+        review_count__gt=0
+    ).values_list('word_id', flat=True)
+    
+    # 학습할 단어 가져오기
+    study_words = Word.objects.exclude(
+        id__in=learned_words
+    ).order_by('?')[:plan.target_words_per_day]
+    
+    # 학습 세션 생성
+    session = StudySession.objects.create(
+        user=request.user,
+        study_plan=plan,
+        study_type='flashcard',
+        start_time=timezone.now()
+    )
+    print(f"[DEBUG] 새 학습 세션 생성됨 (ID: {session.id})")
+    print(f"[DEBUG] 시작 시간: {session.start_time}")
+    
+    # 단어 데이터를 JSON으로 변환
+    words_data = [
+        {
+            'id': word.id,
+            'english': word.english,
+            'korean': word.korean,
+            'example_sentence': word.example_sentence,
+            'example_translation': word.example_translation,
+            'part_of_speech': word.part_of_speech,
+            'difficulty': word.difficulty
+        }
+        for word in study_words
+    ]
+    
+    print(f"[DEBUG] 학습할 단어 수: {len(study_words)}")
+    print("=== 플래시카드 학습 시작 디버깅 종료 ===\n")
+    
+    context = {
+        'plan': plan,
+        'session': session,
+        'words_json': json.dumps(words_data, cls=WordEncoder, ensure_ascii=False),
+        'words': study_words,
+    }
+    
+    return render(request, 'study/flashcard.html', context)
 
 @login_required
 def vocabulary_study(request, plan_id):
+    """단어장 학습 뷰"""
+    print("\n=== 단어장 학습 시작 디버깅 ===")
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
-    return render(request, 'study/vocabulary.html', {'plan': plan})
+    
+    # 이미 학습한 단어 제외
+    learned_words = StudyProgress.objects.filter(
+        user=request.user,
+        review_count__gt=0
+    ).values_list('word_id', flat=True)
+    
+    # 학습할 단어 가져오기
+    study_words = Word.objects.exclude(
+        id__in=learned_words
+    ).order_by('english')[:plan.target_words_per_day]
+    
+    # 학습 세션 생성
+    session = StudySession.objects.create(
+        user=request.user,
+        study_plan=plan,
+        study_type='word_list',
+        start_time=timezone.now()
+    )
+    print(f"[DEBUG] 새 학습 세션 생성됨 (ID: {session.id})")
+    print(f"[DEBUG] 시작 시간: {session.start_time}")
+    print(f"[DEBUG] 학습할 단어 수: {study_words.count()}")
+    print("=== 단어장 학습 시작 디버깅 종료 ===\n")
+    
+    return render(request, 'study/vocabulary.html', {
+        'plan': plan,
+        'words': study_words,
+        'session': session
+    })
 
 @login_required
 def review_study(request, plan_id):
+    print("\n=== 복습 학습 디버깅 ===")
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
-    return render(request, 'study/review.html', {'plan': plan})
+    print(f"[DEBUG] 학습 계획 ID: {plan.id}")
+    print(f"[DEBUG] 학습 계획 제목: {plan.title}")
+    
+    # 복습이 필요한 단어들 가져오기 (proficiency가 1인 단어들)
+    review_words = Word.objects.filter(
+        study_progress__user=request.user,
+        study_progress__proficiency=1
+    ).distinct()
+    
+    print(f"[DEBUG] 복습이 필요한 단어 수: {review_words.count()}")
+    if review_words:
+        print("[DEBUG] 복습할 단어들:")
+        for word in review_words:
+            print(f"  - {word.english} ({word.korean})")
+    
+    # 새로운 학습 세션 생성
+    session = StudySession.objects.create(
+        user=request.user,
+        study_plan=plan,
+        study_type='review'
+    )
+    print(f"[DEBUG] 새 학습 세션 생성됨 (ID: {session.id})")
+    print("=== 복습 학습 디버깅 종료 ===\n")
+    
+    return render(request, 'study/review.html', {
+        'plan': plan,
+        'review_words': review_words,
+        'session': session
+    })
 
 @login_required
 def word_list_study(request):
@@ -289,40 +766,30 @@ def word_progress_update(request, word_id):
         print(f"[DEBUG] POST 데이터: {request.POST}")
         
         word = get_object_or_404(Word, id=word_id)
-        proficiency = request.POST.get('proficiency', '1')
+        proficiency = int(request.POST.get('proficiency', '1'))
         print(f"[DEBUG] 단어 정보: {word.english} (ID: {word.id})")
         print(f"[DEBUG] 숙련도: {proficiency}")
         
         # 현재 시간을 한국 시간대로 가져옴
-        current_time = timezone.localtime(timezone.now())
+        current_time = timezone.now()
         print(f"[DEBUG] 현재 시간 (한국): {current_time}")
         
-        # 기본 학습 계획 가져오기 또는 생성
-        study_plan, created = StudyPlan.objects.get_or_create(
+        # 현재 활성화된 학습 세션 가져오기
+        study_session = StudySession.objects.filter(
             user=request.user,
-            is_active=True,
-            defaults={
-                'title': '기본 학습 계획',
-                'target_words_per_day': 20
-            }
-        )
-        print(f"[DEBUG] 학습 계획: {study_plan.title} (새로 생성됨: {created})")
+            end_time__isnull=True
+        ).order_by('-start_time').first()
         
-        # 새로운 학습 세션 생성
-        study_session = StudySession.objects.create(
-            user=request.user,
-            study_type='word_list',
-            start_time=current_time,
-            end_time=current_time,
-            study_plan=study_plan
-        )
-        print(f"[DEBUG] 학습 세션 생성됨: {study_session.id}")
+        print(f"[DEBUG] 현재 학습 세션: {study_session.id if study_session else 'None'}")
         
         # StudyProgress 생성 또는 업데이트
         try:
             progress = StudyProgress.objects.get(user=request.user, word=word)
             old_review_count = progress.review_count
-            progress.proficiency = proficiency
+            if proficiency == 5:
+                progress.proficiency = 5
+            else:
+                progress.proficiency = min(progress.proficiency + 1, 5)
             progress.review_count += 1
             progress.study_session = study_session
             progress.last_reviewed = current_time
@@ -558,3 +1025,317 @@ def review_start(request, word_id):
         })
     
     return JsonResponse({'success': False}, status=400)
+
+def text_to_speech(request):
+    """텍스트를 음성으로 변환하여 반환합니다."""
+    text = request.GET.get('text', '')
+    if not text:
+        return HttpResponse(status=400)
+    
+    # 음성 파일 저장 경로
+    audio_dir = os.path.join(settings.MEDIA_ROOT, 'audio')
+    if not os.path.exists(audio_dir):
+        os.makedirs(audio_dir)
+    
+    # 파일명 생성 (텍스트의 처음 10글자 사용)
+    filename = f"{text[:10]}.mp3"
+    filepath = os.path.join(audio_dir, filename)
+    
+    # 이미 파일이 존재하면 재사용
+    if not os.path.exists(filepath):
+        tts = gTTS(text=text, lang='en')
+        tts.save(filepath)
+    
+    # 오디오 파일을 직접 반환
+    with open(filepath, 'rb') as f:
+        response = HttpResponse(f.read(), content_type='audio/mpeg')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+def word_detail(request, word_id):
+    word = get_object_or_404(Word, id=word_id)
+    
+    # 단어와 예문의 음성 파일 경로 생성
+    word_audio = text_to_speech(word.english)
+    example_audio = text_to_speech(word.example, lang='en') if word.example else None
+    
+    context = {
+        'word': word,
+        'word_audio': word_audio,
+        'example_audio': example_audio,
+    }
+    return render(request, 'study/word_detail.html', context)
+
+@login_required
+def study_stats_api(request, plan_id):
+    """학습 통계 API"""
+    today = timezone.localtime().date()
+    
+    # 오늘의 학습 세션 가져오기
+    today_session = StudySession.objects.filter(
+        user=request.user,
+        start_time__date=today
+    ).first()
+    
+    # 오늘 학습한 단어 수 계산
+    today_words_count = StudyProgress.objects.filter(
+        user=request.user,
+        last_reviewed__date=today
+    ).count()
+    
+    return JsonResponse({
+        'total_study_time': today_session.study_minutes if today_session else 0,
+        'today_words_count': today_words_count
+    })
+
+@login_required
+def level_test_start(request):
+    """레벨 테스트 시작"""
+    # 이미 진행 중인 테스트가 있는지 확인
+    active_test = LevelTest.objects.filter(
+        usertestresult__user=request.user,
+        usertestresult__completed_at__isnull=True
+    ).first()
+
+    if active_test:
+        messages.info(request, '이미 진행 중인 테스트가 있습니다.')
+        return redirect('study:level_test_continue')
+
+    # 각 난이도별로 20개씩 단어 선택
+    easy_words = list(Word.objects.filter(difficulty='easy').order_by('?')[:20])
+    medium_words = list(Word.objects.filter(difficulty='medium').order_by('?')[:20])
+    hard_words = list(Word.objects.filter(difficulty='hard').order_by('?')[:20])
+
+    # 테스트 생성
+    test = LevelTest.objects.create(
+        title=f"{request.user.username}의 레벨 테스트",
+        description="사용자 레벨을 측정하기 위한 테스트입니다."
+    )
+
+    # 모든 단어를 합치고 섞기
+    all_words = easy_words + medium_words + hard_words
+    shuffle(all_words)
+
+    # 각 단어에 대한 문제 생성
+    for word in all_words:
+        # 보기 생성 (현재 단어의 난이도에서 3개 추가 선택)
+        options = list(Word.objects.filter(
+            difficulty=word.difficulty
+        ).exclude(
+            id=word.id
+        ).values_list('korean', flat=True).order_by('?')[:3])
+        options.append(word.korean)
+        shuffle(options)
+
+        TestQuestion.objects.create(
+            test=test,
+            question_type='multiple_choice',
+            word=word,
+            question_text=f"다음 단어의 뜻으로 알맞은 것은? - {word.english}",
+            correct_answer=word.korean,
+            options=options,
+            points=1
+        )
+
+    # 테스트 결과 초기 생성
+    UserTestResult.objects.create(
+        user=request.user,
+        test=test,
+        score=0,
+        level=1,
+        answers={}
+    )
+
+    return redirect('study:level_test_question', test_id=test.id, question_number=1)
+
+@login_required
+def level_test_question(request, test_id, question_number):
+    """레벨 테스트 문제 풀기"""
+    test = get_object_or_404(LevelTest, id=test_id)
+    questions = test.questions.all()
+    
+    if question_number > questions.count():
+        return redirect('study:level_test_complete', test_id=test_id)
+
+    question = questions[question_number - 1]
+    
+    if request.method == 'POST':
+        answer = request.POST.get('answer')
+        
+        # 답변 저장
+        test_result = UserTestResult.objects.get(user=request.user, test=test)
+        answers = test_result.answers
+        answers[str(question_number)] = {
+            'word_id': question.word.id,
+            'answer': answer,
+            'correct': answer == question.correct_answer,
+            'difficulty': question.word.difficulty
+        }
+        test_result.answers = answers
+        test_result.save()
+
+        return redirect('study:level_test_question', test_id=test_id, question_number=question_number + 1)
+
+    # 진행률 계산
+    progress = (question_number / questions.count()) * 100
+
+    return render(request, 'study/level_test_question.html', {
+        'test': test,
+        'question': question,
+        'question_number': question_number,
+        'total_questions': questions.count(),
+        'options': question.options,
+        'progress': progress
+    })
+
+@login_required
+def level_test_complete(request, test_id):
+    """레벨 테스트 완료 및 결과 계산"""
+    test = get_object_or_404(LevelTest, id=test_id)
+    result = get_object_or_404(UserTestResult, user=request.user, test=test)
+
+    # 난이도별 정답률 계산
+    difficulty_scores = {
+        'easy': {'correct': 0, 'total': 0},
+        'medium': {'correct': 0, 'total': 0},
+        'hard': {'correct': 0, 'total': 0}
+    }
+
+    for answer in result.answers.values():
+        difficulty = answer['difficulty']
+        difficulty_scores[difficulty]['total'] += 1
+        if answer['correct']:
+            difficulty_scores[difficulty]['correct'] += 1
+
+    # 각 난이도의 정답률 계산
+    accuracy_rates = {}
+    for difficulty, scores in difficulty_scores.items():
+        if scores['total'] > 0:
+            accuracy_rates[difficulty] = (scores['correct'] / scores['total']) * 100
+        else:
+            accuracy_rates[difficulty] = 0
+
+    # 레벨 결정
+    if accuracy_rates['hard'] >= 70:
+        level = 5  # 고급
+        difficulty = 'hard'
+    elif accuracy_rates['hard'] >= 50:
+        level = 4  # 중상급
+        difficulty = 'hard'
+    elif accuracy_rates['medium'] >= 70:
+        level = 3  # 중급
+        difficulty = 'medium'
+    elif accuracy_rates['medium'] >= 50:
+        level = 2  # 초급
+        difficulty = 'easy'
+    else:
+        level = 1  # 기초
+        difficulty = 'easy'
+
+    # 총점 계산
+    total_correct = sum(scores['correct'] for scores in difficulty_scores.values())
+    total_questions = sum(scores['total'] for scores in difficulty_scores.values())
+    score = int((total_correct / total_questions) * 100)
+
+    # 결과 저장
+    result.score = score
+    result.level = level
+    result.save()
+
+    # 사용자 레벨 업데이트
+    UserLevel.objects.update_or_create(
+        user=request.user,
+        defaults={
+            'current_level': level,
+            'recommended_words_per_day': 20
+        }
+    )
+
+    # 레벨 테스트 완료 표시
+    request.user.level_test_completed = True
+    request.user.save()
+
+    # 레벨별 설명과 학습 계획 설명 생성
+    level_descriptions = {
+        1: '기초 단계입니다. 기본적인 TOEIC 단어를 학습합니다.',
+        2: '초급 단계입니다. 초급 TOEIC 단어를 학습합니다.',
+        3: '중급 단계입니다. 중급 TOEIC 단어를 학습합니다.',
+        4: '중상급 단계입니다. 중상급 TOEIC 단어를 학습합니다.',
+        5: '고급 단계입니다. 고급 TOEIC 단어를 학습합니다.'
+    }
+
+    study_plan_descriptions = {
+        1: '하루 20개의 기초 단어를 5분 동안 학습합니다.',
+        2: '하루 20개의 초급 단어를 5분 동안 학습합니다.',
+        3: '하루 20개의 중급 단어를 5분 동안 학습합니다.',
+        4: '하루 20개의 중상급 단어를 5분 동안 학습합니다.',
+        5: '하루 20개의 고급 단어를 5분 동안 학습합니다.'
+    }
+
+    # 기존 학습 계획이 있다면 비활성화
+    StudyPlan.objects.filter(user=request.user).update(is_active=False)
+    
+    # 새로운 학습 계획 생성
+    study_plan = StudyPlan.objects.create(
+        user=request.user,
+        title=f'Level {level} 학습 계획',
+        description=study_plan_descriptions[level],
+        target_words_per_day=request.user.profile.daily_goal,
+        target_study_time=5,  # 5분으로 설정
+        difficulty=difficulty,
+        is_active=True
+    )
+
+    # 난이도별 정답률 정보를 포함한 학습 추천 목록 생성
+    recommendations = [
+        {
+            'title': '난이도별 정답률',
+            'description': f'초급: {accuracy_rates["easy"]:.1f}%, 중급: {accuracy_rates["medium"]:.1f}%, 고급: {accuracy_rates["hard"]:.1f}%'
+        },
+        {
+            'title': '추천 학습 난이도',
+            'description': f'현재 {difficulty} 난이도의 단어를 학습하는 것이 적합합니다.'
+        },
+        {
+            'title': '학습 계획',
+            'description': f'하루 {study_plan.target_words_per_day}개의 단어를 {study_plan.target_study_time}분 동안 학습합니다.'
+        }
+    ]
+
+    messages.success(request, '레벨 테스트가 완료되었습니다!')
+    messages.info(request, f'레벨에 맞는 학습 계획이 자동으로 생성되었습니다. 학습 계획 페이지에서 확인해보세요!')
+
+    return render(request, 'study/level_test_result.html', {
+        'result': result,
+        'accuracy_rates': accuracy_rates,
+        'total_correct': total_correct,
+        'total_questions': total_questions,
+        'level_description': level_descriptions[level],
+        'study_plan_description': study_plan_descriptions[level],
+        'recommendations': recommendations
+    })
+
+@login_required
+def plan_activate(request, plan_id):
+    plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
+    
+    # 다른 활성화된 계획 비활성화
+    StudyPlan.objects.filter(user=request.user, is_active=True).update(is_active=False)
+    
+    # 선택한 계획 활성화
+    plan.is_active = True
+    plan.save()
+    
+    messages.success(request, '학습 계획이 활성화되었습니다.')
+    return redirect('study:home')
+
+@login_required
+def plan_deactivate(request, plan_id):
+    plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
+    
+    if plan.is_active:
+        plan.is_active = False
+        plan.save()
+        messages.success(request, '학습 계획이 비활성화되었습니다.')
+    
+    return redirect('study:home')

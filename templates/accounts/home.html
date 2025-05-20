@@ -27,7 +27,22 @@
                             <div class="progress-bar" role="progressbar" style="width: {{ today_progress|calculate_progress:daily_goal }}%"></div>
                         </div>
                     </div>
-                    <p class="card-text">오늘 학습한 단어: {{ today_progress }}/{{ daily_goal }}개</p>
+                    <p class="card-text">오늘 학습한 단어: <strong>{{ today_progress }}/{{ daily_goal }}개</strong></p>
+                    <!-- 오늘의 목표 달성 메시지 -->
+                    {% if today_progress >= daily_goal %}
+                    <div class="alert alert-success text-center mt-3" role="alert" style="font-size:1.1rem; width: 100%;">
+                        <i class="fas fa-trophy text-warning me-2"></i>오늘의 목표를 달성하셨습니다.<br>축하합니다!
+                    </div>
+                    {% endif %}
+
+                    <!-- 디버그 정보 
+                    <div class="alert alert-info mt-3">
+                        <h6>디버그 정보:</h6>
+                        <p>today_progress: {{ today_progress }}</p>
+                        <p>daily_goal: {{ daily_goal }}</p>
+                        <p>progress: {{ today_progress|calculate_progress:daily_goal }}%</p>
+                    </div>
+                -->
                 </div>
             </div>
         </div>
@@ -39,19 +54,29 @@
                     <h5 class="card-title mb-0">오늘의 단어</h5>
                 </div>
                 <div class="card-body">
-                    {% if random_word %}
+                    {% if todays_word %}
                     <div class="word-card">
-                        <h4>{{ random_word.english }}</h4>
-                        <p class="pronunciation">[{{ random_word.part_of_speech }}]</p>
-                        <p>{{ random_word.korean }}</p>
-                        {% if random_word.example_sentence %}
-                        <p class="small text-muted">{{ random_word.example_sentence }}</p>
+                        <h4>{{ todays_word.english }}</h4>
+                        <p class="pronunciation">[{{ todays_word.part_of_speech }}]</p>
+                        <p>{{ todays_word.korean }}</p>
+                        <div class="d-flex justify-content-center gap-2 mb-2">
+                            <button class="btn btn-sm btn-primary" onclick="playAudio('{{ todays_word.english }}')">
+                                <i class="fas fa-volume-up"></i> 단어 발음
+                            </button>
+                            {% if todays_word.example_sentence %}
+                            <button class="btn btn-sm btn-secondary" onclick="playAudio('{{ todays_word.example_sentence }}')">
+                                <i class="fas fa-volume-up"></i> 예문 발음
+                            </button>
+                            {% endif %}
+                        </div>
+                        {% if todays_word.example_sentence %}
+                        <p class="small text-muted">{{ todays_word.example_sentence }}</p>
+                        <p class="text-muted"><small>{{ todays_word.example_translation }}</small></p>
                         {% endif %}
                     </div>
                     {% else %}
                     <p class="text-center">단어를 불러올 수 없습니다.</p>
                     {% endif %}
-                    <a href="{% url 'study:daily_words' %}" class="btn btn-primary">더 보기</a>
                 </div>
             </div>
         </div>
@@ -91,7 +116,7 @@
             </a>
         </div>
         <div class="col-md-3 mb-4">
-            <a href="{% url 'study:wrong_notes' %}" class="card text-decoration-none">
+            <a href="{% url 'quiz:all_wrong_answer_notes' %}" class="card text-decoration-none">
                 <div class="card-body text-center">
                     <h5 class="card-title">오답 노트</h5>
                     <p class="card-text">틀린 단어를 복습하세요</p>
@@ -99,9 +124,9 @@
             </a>
         </div>
         <div class="col-md-3 mb-4">
-            <a href="{% url 'vocabulary:bookmark_list' %}" class="card text-decoration-none">
+            <a href="{% url 'vocabulary:bookmarked_words' %}" class="card text-decoration-none">
                 <div class="card-body text-center">
-                    <h5 class="card-title">북마크</h5>
+                    <h5 class="card-title">즐겨찾기</h5>
                     <p class="card-text">중요 단어를 모아보세요</p>
                 </div>
             </a>
@@ -154,4 +179,13 @@
         </div>
     </div>
 {% endif %}
+
+<script>
+function playAudio(text) {
+    const audio = new Audio(`/study/text-to-speech/?text=${encodeURIComponent(text)}`);
+    audio.play().catch(error => {
+        console.error('오디오 재생 중 오류 발생:', error);
+    });
+}
+</script>
 {% endblock %} 

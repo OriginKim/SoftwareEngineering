@@ -3,6 +3,9 @@ from django.conf import settings
 from apps.vocabulary.models import Word
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from datetime import datetime, timedelta
+
+User = get_user_model()
 
 class StudyPlan(models.Model):
     """학습 계획 모델"""
@@ -11,11 +14,22 @@ class StudyPlan(models.Model):
         on_delete=models.CASCADE,
         related_name='study_plans'
     )
-    title = models.CharField(max_length=100)
-    target_words_per_day = models.PositiveIntegerField(default=20)
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, null=True)  # 설명 필드 추가
+    target_words_per_day = models.IntegerField(default=10)
+    target_study_time = models.IntegerField(default=30)  # 분 단위
+    difficulty = models.CharField(
+        max_length=10,
+        choices=[
+            ('easy', '초급'),
+            ('medium', '중급'),
+            ('hard', '고급')
+        ],
+        default='easy'
+    )
+    is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    is_active = models.BooleanField(default=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -52,12 +66,12 @@ class StudyPlan(models.Model):
 
 class StudySession(models.Model):
     """학습 세션 모델"""
-    STUDY_TYPES = [
+    STUDY_TYPE_CHOICES = [
         ('flashcard', '플래시카드'),
         ('word_list', '단어장'),
-        ('review', '복습'),
+        ('review', '복습')
     ]
-
+    
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -66,68 +80,32 @@ class StudySession(models.Model):
     study_plan = models.ForeignKey(
         StudyPlan,
         on_delete=models.CASCADE,
-        related_name='sessions'
+        related_name='sessions',
+        null=True
     )
     study_type = models.CharField(
         max_length=20,
-        choices=STUDY_TYPES
+        choices=STUDY_TYPE_CHOICES,
+        default='flashcard'
     )
     start_time = models.DateTimeField(auto_now_add=True)
     end_time = models.DateTimeField(null=True, blank=True)
-    duration = models.DurationField(null=True, blank=True)
-    words_studied = models.ManyToManyField(
-        Word,
-        through='StudyProgress',
-        related_name='study_sessions'
-    )
+    study_minutes = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['-start_time']
+        unique_together = ['user', 'start_time']
 
     def __str__(self):
-        return f"{self.user.username}의 {self.get_study_type_display()} 학습"
-        
-    def get_duration(self):
-        """학습 시간을 반환"""
-        if not self.end_time:
-            return timezone.now() - self.start_time
-        return self.end_time - self.start_time
-        
-    def get_duration_display(self):
-        """학습 시간을 사람이 읽기 쉬운 형태로 반환"""
-        duration = self.get_duration()
-        hours = duration.seconds // 3600
-        minutes = (duration.seconds % 3600) // 60
-        
-        if hours > 0:
-            return f"{hours}시간 {minutes}분"
-        return f"{minutes}분"
-        
-    def get_studied_words_count(self):
-        """이 세션에서 학습한 단어 수를 반환"""
-        return self.progress.count()
-        
-    def get_average_proficiency(self):
-        """이 세션의 평균 숙련도를 반환"""
-        avg = self.progress.aggregate(avg=models.Avg('proficiency'))['avg']
-        return avg if avg is not None else 0.0
-        
-    def end_session(self):
-        """세션을 종료"""
-        if not self.end_time:
-            self.end_time = timezone.now()
-            self.save()
+        return f"{self.user.username}의 학습 세션 ({self.start_time})"
+
+    @property
+    def date(self):
+        return self.start_time.date()
 
 class StudyProgress(models.Model):
     """학습 진도 모델"""
-    PROFICIENCY_LEVELS = [
-        (1, '처음 봤어요'),
-        (2, '어려워요'),
-        (3, '복습이 필요해요'),
-        (4, '알 것 같아요'),
-        (5, '완전히 알아요'),
-    ]
-
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -139,36 +117,34 @@ class StudyProgress(models.Model):
         related_name='study_progress'
     )
     study_session = models.ForeignKey(
-        StudySession,
-        on_delete=models.CASCADE,
+        'StudySession',
+        on_delete=models.SET_NULL,
         related_name='progress',
         null=True,
         blank=True
     )
-    proficiency = models.IntegerField(
-        choices=PROFICIENCY_LEVELS,
-        default=1
-    )
-    is_bookmarked = models.BooleanField(default=False)
-    last_reviewed = models.DateTimeField(auto_now=True)
+    proficiency = models.IntegerField(default=1)  # 1-5 척도
+    review_count = models.IntegerField(default=0)
+    last_reviewed = models.DateTimeField(default=timezone.now)
     next_review_date = models.DateField(null=True, blank=True)
-    review_count = models.PositiveIntegerField(default=0)
+    is_bookmarked = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ['user', 'word']
-        ordering = ['-last_reviewed']
 
     def __str__(self):
         return f"{self.user.username}의 {self.word.english} 학습 진도"
 
 class ReviewSchedule(models.Model):
     """복습 일정 모델"""
-    REVIEW_STATUS = [
-        ('pending', '대기중'),
+    STATUS_CHOICES = [
+        ('pending', '대기'),
         ('completed', '완료'),
-        ('missed', '놓침'),
+        ('skipped', '건너뜀')
     ]
-
+    
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -180,25 +156,23 @@ class ReviewSchedule(models.Model):
         related_name='review_schedules'
     )
     scheduled_date = models.DateField()
-    status = models.CharField(
-        max_length=20,
-        choices=REVIEW_STATUS,
-        default='pending'
-    )
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='pending')
     completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['scheduled_date']
 
     def __str__(self):
-        return f"{self.user.username}의 {self.word.english} 복습 일정 ({self.scheduled_date})"
+        return f"{self.user.username}의 {self.word.english} 복습 일정"
 
 class Notification(models.Model):
     """알림 모델"""
-    NOTIFICATION_TYPES = [
-        ('review', '복습 알림'),
-        ('achievement', '목표 달성'),
-        ('reminder', '학습 독려'),
+    TYPE_CHOICES = [
+        ('review', '복습'),
+        ('achievement', '성취'),
+        ('reminder', '리마인더')
     ]
 
     user = models.ForeignKey(
@@ -206,65 +180,31 @@ class Notification(models.Model):
         on_delete=models.CASCADE,
         related_name='notifications'
     )
-    type = models.CharField(
-        max_length=20,
-        choices=NOTIFICATION_TYPES
-    )
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES)
     title = models.CharField(max_length=200)
     message = models.TextField()
-    link = models.CharField(max_length=200, blank=True)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
-        return f"{self.user.username}의 {self.get_type_display()} - {self.title}"
-
-    @classmethod
-    def create_review_notification(cls, user, word_count):
-        """복습 알림 생성"""
-        return cls.objects.create(
-            user=user,
-            type='review',
-            title='복습할 단어가 있습니다',
-            message=f'오늘 복습해야 할 {word_count}개의 단어가 있습니다.',
-            link='/study/review/'
-        )
-
-    @classmethod
-    def create_achievement_notification(cls, user, achievement):
-        """목표 달성 알림 생성"""
-        return cls.objects.create(
-            user=user,
-            type='achievement',
-            title='목표를 달성했습니다! 🎉',
-            message=f'축하합니다! {achievement}을(를) 달성했습니다.',
-            link='/study/statistics/'
-        )
-
-    @classmethod
-    def create_reminder_notification(cls, user, days):
-        """학습 독려 알림 생성"""
-        return cls.objects.create(
-            user=user,
-            type='reminder',
-            title='학습을 이어가보세요',
-            message=f'마지막 학습 후 {days}일이 지났습니다. 오늘도 학습을 이어가보세요!',
-            link='/study/plans/'
-        )
+        return f"{self.user.username}의 알림: {self.title}"
 
 class UserNotificationSettings(models.Model):
     user = models.OneToOneField(
-        get_user_model(),
+        User,
         on_delete=models.CASCADE,
         related_name='notification_settings'
     )
-    review_notifications = models.BooleanField(default=True, verbose_name='복습 알림')
-    achievement_notifications = models.BooleanField(default=True, verbose_name='성취 알림')
-    reminder_notifications = models.BooleanField(default=True, verbose_name='학습 독려 알림')
-    notification_time = models.TimeField(default=timezone.now, verbose_name='알림 시간')
+    review_notifications = models.BooleanField(default=True)
+    achievement_notifications = models.BooleanField(default=True)
+    reminder_notifications = models.BooleanField(default=True)
+    notification_time = models.TimeField(default=datetime.strptime('09:00', '%H:%M').time())
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
         verbose_name = '알림 설정'
@@ -280,7 +220,7 @@ class UserNotificationSettings(models.Model):
 
 class WordStudyHistory(models.Model):
     """단어 학습 이력을 저장하는 모델"""
-    user = models.ForeignKey(get_user_model(), on_delete=models.CASCADE, related_name='word_study_histories')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='word_study_histories')
     word = models.ForeignKey(Word, on_delete=models.CASCADE)
     is_correct = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -292,3 +232,110 @@ class WordStudyHistory(models.Model):
 
     def __str__(self):
         return f"{self.user.username}의 {self.word.english} 학습 기록"
+
+class LevelTest(models.Model):
+    """레벨 테스트 모델"""
+    DIFFICULTY_CHOICES = [
+        ('beginner', '초급'),
+        ('intermediate', '중급'),
+        ('advanced', '고급')
+    ]
+
+    title = models.CharField(max_length=100)
+    description = models.TextField()
+    difficulty = models.CharField(max_length=20, choices=DIFFICULTY_CHOICES)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.title} ({self.get_difficulty_display()})"
+
+class TestQuestion(models.Model):
+    """테스트 문제 모델"""
+    QUESTION_TYPES = [
+        ('multiple_choice', '객관식'),
+        ('word_meaning', '단어 의미'),
+        ('sentence_completion', '문장 완성'),
+        ('context_usage', '문맥 속 사용')
+    ]
+
+    test = models.ForeignKey(LevelTest, on_delete=models.CASCADE, related_name='questions')
+    question_type = models.CharField(max_length=20, choices=QUESTION_TYPES)
+    word = models.ForeignKey(Word, on_delete=models.CASCADE, related_name='test_questions')
+    question_text = models.TextField()
+    correct_answer = models.CharField(max_length=200)
+    options = models.JSONField(help_text='객관식 문제의 보기')
+    explanation = models.TextField(blank=True)
+    points = models.IntegerField(default=1)
+
+    def __str__(self):
+        return f"{self.test.title} - {self.question_text[:30]}"
+
+class UserTestResult(models.Model):
+    """사용자 테스트 결과 모델"""
+    LEVEL_CHOICES = [
+        (1, 'Level 1 - 기초'),
+        (2, 'Level 2 - 초급'),
+        (3, 'Level 3 - 중급'),
+        (4, 'Level 4 - 중상급'),
+        (5, 'Level 5 - 고급')
+    ]
+
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    test = models.ForeignKey(LevelTest, on_delete=models.CASCADE)
+    score = models.IntegerField()
+    level = models.IntegerField(choices=LEVEL_CHOICES)
+    completed_at = models.DateTimeField(auto_now_add=True)
+    answers = models.JSONField(help_text='사용자의 답변 기록')
+    
+    class Meta:
+        ordering = ['-completed_at']
+
+    def __str__(self):
+        return f"{self.user.username}의 테스트 결과 - Level {self.level}"
+
+class UserLevel(models.Model):
+    """사용자 현재 레벨 모델"""
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    current_level = models.IntegerField(choices=UserTestResult.LEVEL_CHOICES)
+    last_test_date = models.DateTimeField(auto_now=True)
+    recommended_words_per_day = models.IntegerField(default=20)
+    
+    def __str__(self):
+        return f"{self.user.username}의 현재 레벨 - Level {self.current_level}"
+
+class DailyGoal(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='daily_goals')
+    date = models.DateField(default=timezone.now)
+    words = models.IntegerField(default=20)  # 일일 목표 단어 수
+    study_time = models.IntegerField(default=5)  # 일일 목표 학습 시간(분)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'date')
+        ordering = ['-date']
+
+    def __str__(self):
+        return f"{self.user.username}의 {self.date} 일일 목표"
+
+class StudyNotification(models.Model):
+    NOTIFICATION_TYPES = (
+        ('review', '복습 알림'),
+        ('forgotten', '자주 틀리는 단어'),
+        ('achievement', '업적 달성'),
+        ('reminder', '학습 리마인더'),
+    )
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='study_notifications')
+    word = models.ForeignKey(Word, on_delete=models.CASCADE, null=True, blank=True)
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
+    message = models.TextField()
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username}의 {self.notification_type} 알림"

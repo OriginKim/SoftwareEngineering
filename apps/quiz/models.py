@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.contrib.auth.models import User
 from apps.vocabulary.models import Word
 
 class Quiz(models.Model):
@@ -57,7 +58,9 @@ class QuizQuestion(models.Model):
 class QuizAttempt(models.Model):
     """퀴즈 응시 기록 모델"""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='quiz_attempts')
-    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, related_name='attempts')
+    quiz = models.OneToOneField(Quiz, on_delete=models.CASCADE, related_name='attempt', null=True, blank=True)
+    quiz_type = models.CharField(max_length=20, blank=True, null=True)
+    mode = models.CharField(max_length=20, blank=True, null=True)
     started_at = models.DateTimeField('시작 시간', auto_now_add=True)
     completed_at = models.DateTimeField('완료 시간', null=True, blank=True)
     score = models.IntegerField('점수', default=0)
@@ -70,7 +73,22 @@ class QuizAttempt(models.Model):
         ordering = ['-started_at']
 
     def __str__(self):
-        return f"{self.user.username}의 {self.quiz.title} 응시"
+        return f"{self.user.username}의 {self.quiz.title if self.quiz else self.get_type_display()} 응시"
+
+    def get_type_display(self):
+        # 유형+모드 조합을 한글로 반환
+        type_map = {
+            'ko_to_en': '한→영',
+            'en_to_ko': '영→한',
+            'favorite': '즐겨찾기',
+        }
+        mode_map = {
+            'multiple': '객관식',
+            'typing': '주관식',
+        }
+        t = type_map.get(self.quiz_type, '기타')
+        m = mode_map.get(self.mode, '')
+        return f"{t} {m}".strip()
 
     @property
     def accuracy_rate(self):
@@ -94,3 +112,20 @@ class QuizAnswerHistory(models.Model):
 
     def __str__(self):
         return f"{self.attempt.user.username}의 {self.question.quiz.title} {self.question.order}번 답안"
+
+class WrongAnswerNote(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='wrong_answers')
+    word = models.ForeignKey(Word, on_delete=models.CASCADE)
+    question = models.CharField(max_length=200)  # 문제 (한글)
+    correct_answer = models.CharField(max_length=200)  # 정답 (영어)
+    user_answer = models.CharField(max_length=200)  # 사용자의 답
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_reviewed_at = models.DateTimeField(null=True, blank=True)  # 마지막 복습 시간
+    is_mastered = models.BooleanField(default=False)  # 마스터 여부를 저장하는 필드 추가
+
+    class Meta:
+        ordering = ['-created_at']
+        unique_together = ['user', 'word']  # 같은 단어는 한 번만 저장
+
+    def __str__(self):
+        return f"{self.user.username}의 오답: {self.word.english}"

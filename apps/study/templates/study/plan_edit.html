@@ -32,6 +32,17 @@
                             <div class="form-text">하루에 학습할 목표 단어 수를 선택하세요.</div>
                         </div>
 
+                        <div class="mb-4">
+                            <label for="target_study_time" class="form-label">일일 목표 학습 시간</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="target_study_time" 
+                                       name="target_study_time" value="{{ plan.target_study_time }}" 
+                                       min="5" max="180" required>
+                                <span class="input-group-text">분</span>
+                            </div>
+                            <div class="form-text">하루에 투자할 목표 학습 시간을 입력하세요. (5분~180분)</div>
+                        </div>
+
                         <div class="mb-3">
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input" id="is_active" name="is_active"

@@ -2,12 +2,17 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.utils import timezone
-from django.db.models import Q, Count
-from .models import Quiz, QuizQuestion, QuizAttempt
+from django.db.models import Q, Count, Max
+from .models import Quiz, QuizQuestion, QuizAttempt, WrongAnswerNote
 from apps.vocabulary.models import Word
 import random
 from django.urls import reverse
 from apps.study.models import StudyProgress, WordStudyHistory
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.views.decorators.http import require_POST, require_http_methods
+import json
+from django.core.paginator import Paginator
 
 # Create your views here.
 
@@ -28,12 +33,31 @@ def quiz_home(request):
     recent_quizzes = Quiz.objects.filter(
         Q(created_by=request.user) | Q(is_public=True)
     ).order_by('-created_at')[:5]
+
+    # 최근 퀴즈 기록 추가 - 중복 제거
+    recent_attempts_list = QuizAttempt.objects.filter(
+        user=request.user,
+        completed_at__isnull=False
+    ).values('quiz', 'user', 'completed_at').annotate(
+        id=Max('id')  # 각 그룹에서 가장 최근의 ID 선택
+    ).values_list('id', flat=True)
+    
+    # 선택된 ID로 전체 레코드 조회
+    recent_attempts_list = QuizAttempt.objects.filter(
+        id__in=recent_attempts_list
+    ).order_by('-completed_at')
+    
+    page_number = request.GET.get('page', 1)
+    paginator = Paginator(recent_attempts_list, 5)
+    recent_attempts = paginator.get_page(page_number)
     
     context = {
         'total_words': total_words,
         'learned_words': learned_words,
         'studied_words_count': studied_words_count,
-        'recent_quizzes': recent_quizzes
+        'recent_quizzes': recent_quizzes,
+        'recent_attempts': recent_attempts,
+        'paginator': paginator,
     }
     
     return render(request, 'quiz/quiz_home.html', context)
@@ -118,11 +142,22 @@ def word_test(request):
         return render(request, 'quiz/test_result.html', context)
     
     # GET 요청: 새로운 테스트 시작
-    # 학습한 단어들 중에서 10개를 랜덤으로 선택
-    studied_words = Word.objects.filter(
-        study_progress__user=request.user,
-        study_progress__review_count__gt=0
-    ).distinct()
+    # 북마크된 단어만 테스트할지 여부 확인
+    bookmarked_only = request.GET.get('bookmarked', 'false').lower() == 'true'
+    
+    # 기본 쿼리셋
+    if bookmarked_only:
+        # 북마크된 단어만 선택
+        studied_words = Word.objects.filter(
+            study_progress__user=request.user,
+            study_progress__is_bookmarked=True
+        ).distinct()
+    else:
+        # 학습한 단어들 중에서 선택
+        studied_words = Word.objects.filter(
+            study_progress__user=request.user,
+            study_progress__review_count__gt=0
+        ).distinct()
     
     if studied_words.count() < 10:
         messages.warning(request, '테스트를 위해서는 최소 10개의 단어를 학습해야 합니다.')
@@ -153,7 +188,8 @@ def word_test(request):
         })
     
     return render(request, 'quiz/word_test.html', {
-        'questions': questions
+        'questions': questions,
+        'bookmarked_only': bookmarked_only
     })
 
 @login_required
@@ -421,17 +457,839 @@ def quiz_history_detail(request, attempt_id):
     attempt = get_object_or_404(QuizAttempt, id=attempt_id, user=request.user)
     questions = QuizQuestion.objects.filter(quiz=attempt.quiz).select_related('word')
     
+    # 이전 퀴즈 기록 가져오기
+    previous_attempts = QuizAttempt.objects.filter(
+        user=request.user,
+        completed_at__lt=attempt.completed_at
+    ).order_by('-completed_at')[:5]
+    
     answer_history = []
     for question in questions:
+        # 이전 퀴즈에서의 정답 여부 확인
+        previous_correct = False
+        if previous_attempts.exists():
+            prev_questions = QuizQuestion.objects.filter(
+                quiz__in=[a.quiz for a in previous_attempts if a.quiz],
+                word=question.word,
+                is_correct=True
+            ).exists()
+            previous_correct = prev_questions
+        
         answer_history.append({
             'question': question,
             'user_answer': question.user_answer,
-            'is_correct': question.is_correct
+            'is_correct': question.is_correct,
+            'previous_correct': previous_correct
         })
     
     context = {
         'attempt': attempt,
-        'answer_history': answer_history
+        'answer_history': answer_history,
+        'show_add_note': False,  # 결과 복습에서는 오답노트 버튼 숨김
+        'previous_attempts': previous_attempts
     }
     
     return render(request, 'quiz/quiz_history_detail.html', context)
+
+@login_required
+def quiz_timer(request):
+    """타이머 퀴즈 뷰"""
+    if request.method == 'POST':
+        # 답안 처리
+        answers = request.POST.getlist('answers[]')
+        word_ids = request.POST.getlist('word_ids[]')
+        score = 0
+        results = []
+        
+        for word_id, answer in zip(word_ids, answers):
+            word = Word.objects.get(id=word_id)
+            is_correct = answer.lower().strip() == word.korean.lower().strip()
+            if is_correct:
+                score += 1
+            results.append({
+                'word': word.english,
+                'correct_answer': word.korean,
+                'user_answer': answer,
+                'is_correct': is_correct
+            })
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=is_correct,
+            )
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=None,  # 타이머 퀴즈는 퀴즈 객체가 없음
+            score=score * 10,  # 100점 만점
+            total_questions=len(word_ids),
+            correct_answers=score,
+            completed_at=timezone.now()
+        )
+        
+        context = {
+            'score': score * 10,  # 100점 만점으로 변환
+            'correct_count': score,
+            'total_questions': len(word_ids),
+            'answers': results,
+            'attempt': attempt
+        }
+        
+        return render(request, 'quiz/test_result.html', context)
+    
+    # GET 요청: 새로운 테스트 시작
+    # 학습한 단어들 중에서 20개를 랜덤으로 선택
+    studied_words = Word.objects.filter(
+        study_progress__user=request.user,
+        study_progress__review_count__gt=0
+    ).distinct()
+    
+    if studied_words.count() < 20:
+        messages.warning(request, '타이머 퀴즈를 위해서는 최소 20개의 단어를 학습해야 합니다.')
+        return redirect('study:daily_words')
+    
+    test_words = list(studied_words.order_by('?')[:20])
+    questions = []
+    
+    for word in test_words:
+        questions.append({
+            'word_id': word.id,
+            'english': word.english,
+            'korean': word.korean
+        })
+    
+    context = {
+        'questions': questions,
+        'time_limit': 300,  # 5분(300초) 제한시간
+    }
+    
+    return render(request, 'quiz/timer_quiz.html', context)
+
+@login_required
+@csrf_exempt
+def en_to_ko_multiple(request):
+    user = request.user
+    studied_words = Word.objects.filter(
+        study_progress__user=user,
+        study_progress__review_count__gt=0
+    ).distinct()
+    if studied_words.count() < 15:
+        messages.warning(request, '테스트를 위해서는 최소 15개의 단어를 학습해야 합니다.')
+        return redirect('quiz:quiz_home')
+
+    if request.method == 'POST':
+        # 세션에서 문제 데이터 가져오기
+        questions = request.session.get('en_to_ko_multiple_questions', [])
+        if not questions or 'word_id' not in questions[0]:
+            messages.error(request, '퀴즈 세션이 만료되었습니다. 다시 시작해주세요.')
+            return redirect('quiz:quiz_home')
+            
+        user_answers = [request.POST.get(f'answer_{i+1}') for i in range(len(questions))]
+        correct_count = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="영어 → 한국어 객관식",
+            quiz_type='en_to_ko',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, q in enumerate(questions):
+            correct = user_answers[i] == q['answer']
+            correct_count += int(correct)
+            
+            # 단어 찾기
+            word = Word.objects.get(id=q['word_id'])
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=user_answers[i],
+                is_correct=correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=correct,
+            )
+            
+            results.append({
+                'question': q['question'],
+                'answer': q['answer'],
+                'options': q['options'],
+                'user_answer': user_answers[i],
+                'is_correct': correct
+            })
+            
+        score = int(correct_count / len(questions) * 100)
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            quiz_type='en_to_ko',
+            mode='multiple',
+            score=score,
+            total_questions=len(questions),
+            correct_answers=correct_count,
+            completed_at=timezone.now()
+        )
+        
+        # 세션 데이터 삭제
+        if 'en_to_ko_multiple_questions' in request.session:
+            del request.session['en_to_ko_multiple_questions']
+        
+        return render(request, 'quiz/en_to_ko_multiple_result.html', {
+            'results': results,
+            'score': score,
+            'correct_count': correct_count,
+            'total': len(questions),
+            'attempt': attempt
+        })
+    else:
+        # GET 요청 시 세션 초기화
+        if 'en_to_ko_multiple_questions' in request.session:
+            del request.session['en_to_ko_multiple_questions']
+            
+        import random
+        words = list(studied_words.order_by('?')[:15])
+        questions = []
+        for word in words:
+            wrongs = list(Word.objects.exclude(id=word.id).order_by('?')[:3])
+            options = [word.korean] + [w.korean for w in wrongs]
+            random.shuffle(options)
+            questions.append({
+                'word_id': word.id,
+                'question': word.english,
+                'answer': word.korean,
+                'options': options
+            })
+        request.session['en_to_ko_multiple_questions'] = questions
+        return render(request, 'quiz/en_to_ko_multiple.html', {
+            'questions': questions
+        })
+
+@login_required
+@csrf_exempt
+def en_to_ko_typing(request):
+    user = request.user
+    studied_words = Word.objects.filter(
+        study_progress__user=user,
+        study_progress__review_count__gt=0
+    ).distinct()
+    if studied_words.count() < 15:
+        messages.warning(request, '테스트를 위해서는 최소 15개의 단어를 학습해야 합니다.')
+        return redirect('quiz:quiz_home')
+
+    if request.method == 'POST':
+        # 세션에서 문제 데이터 가져오기
+        questions = request.session.get('en_to_ko_typing_questions', [])
+        if not questions or 'word_id' not in questions[0]:
+            messages.error(request, '퀴즈 세션이 만료되었습니다. 다시 시작해주세요.')
+            return redirect('quiz:quiz_home')
+            
+        user_answers = [request.POST.get(f'answer_{i+1}', '').strip() for i in range(len(questions))]
+        correct_count = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="영어 → 한국어 주관식",
+            quiz_type='en_to_ko',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, q in enumerate(questions):
+            correct = user_answers[i] == q['answer']
+            correct_count += int(correct)
+            
+            # 단어 찾기
+            word = Word.objects.get(id=q['word_id'])
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=user_answers[i],
+                is_correct=correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=correct,
+            )
+            
+            results.append({
+                'question': q['question'],
+                'answer': q['answer'],
+                'user_answer': user_answers[i],
+                'is_correct': correct
+            })
+            
+        score = int(correct_count / len(questions) * 100)
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            quiz_type='en_to_ko',
+            mode='typing',
+            score=score,
+            total_questions=len(questions),
+            correct_answers=correct_count,
+            completed_at=timezone.now()
+        )
+        
+        # 세션 데이터 삭제
+        if 'en_to_ko_typing_questions' in request.session:
+            del request.session['en_to_ko_typing_questions']
+        
+        return render(request, 'quiz/en_to_ko_typing_result.html', {
+            'results': results,
+            'score': score,
+            'correct_count': correct_count,
+            'total': len(questions),
+            'attempt': attempt
+        })
+    else:
+        # GET 요청 시 세션 초기화
+        if 'en_to_ko_typing_questions' in request.session:
+            del request.session['en_to_ko_typing_questions']
+            
+        import random
+        words = list(studied_words.order_by('?')[:15])
+        questions = []
+        for word in words:
+            questions.append({
+                'word_id': word.id,
+                'question': word.english,
+                'answer': word.korean
+            })
+        request.session['en_to_ko_typing_questions'] = questions
+        return render(request, 'quiz/en_to_ko_typing.html', {
+            'questions': questions
+        })
+
+@require_http_methods(["POST"])
+@login_required
+def toggle_mastered(request, note_id):
+    try:
+        note = WrongAnswerNote.objects.get(id=note_id, user=request.user)
+        note.is_mastered = not note.is_mastered
+        note.save()
+        return JsonResponse({
+            'status': 'success',
+            'is_mastered': note.is_mastered
+        })
+    except WrongAnswerNote.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'message': '오답노트를 찾을 수 없습니다.'
+        }, status=404)
+
+def all_wrong_answer_notes(request):
+    notes = WrongAnswerNote.objects.filter(
+        user=request.user,
+        is_mastered=False  # 마스터하지 않은 단어만 표시
+    ).select_related('word').order_by('-created_at')
+    
+    return render(request, 'quiz/all_wrong_answer_notes.html', {
+        'notes': notes
+    })
+
+@login_required
+@require_POST
+def add_wrong_answer(request):
+    """오답 노트에 추가 (한->영, 영->한 모두 지원)"""
+    try:
+        data = json.loads(request.body)
+        question = data.get('question')
+        answer = data.get('answer')
+        user_answer = data.get('user_answer')
+
+        # 한글/영어 순서에 상관없이 단어 찾기
+        word = Word.objects.filter(
+            (Q(korean=question) & Q(english=answer)) |
+            (Q(english=question) & Q(korean=answer))
+        ).first()
+        if not word:
+            return JsonResponse({'success': False, 'error': '단어를 찾을 수 없습니다.'})
+
+        # 이미 오답 노트에 있는지 확인
+        note, created = WrongAnswerNote.objects.get_or_create(
+            user=request.user,
+            word=word,
+            defaults={
+                'question': question,
+                'correct_answer': answer,
+                'user_answer': user_answer
+            }
+        )
+
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def wrong_answer_notes(request):
+    quiz_attempt_id = request.GET.get('quiz_id')
+    if not quiz_attempt_id:
+        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
+
+    attempt = QuizAttempt.objects.filter(id=quiz_attempt_id, user=request.user).first()
+    if not attempt:
+        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
+
+    # 해당 시도의 틀린 문제만 쿼리
+    wrong_questions = QuizQuestion.objects.filter(quiz=attempt.quiz, is_correct=False)
+    # 객관식/주관식 등 quiz=None인 경우(임시 퀴즈) 처리
+    if attempt.quiz is None:
+        # quiz=None인 경우 QuizQuestion과 연결이 없으므로, WordStudyHistory 등에서 틀린 단어를 찾아야 할 수도 있음
+        # 하지만 현재 구조상 QuizQuestion이 생성되지 않으면, 틀린 단어를 알 수 없음
+        # (필요시 추가 구현)
+        wrong_questions = []
+    
+    # 각 문제별로 오답노트 등록 여부 체크
+    notes = []
+    for q in wrong_questions:
+        already_added = WrongAnswerNote.objects.filter(user=request.user, word=q.word).exists()
+        notes.append({
+            'word': q.word,
+            'already_added': already_added,
+            'question': q,
+        })
+
+    return render(request, 'quiz/wrong_answer_notes.html', {
+        'notes': notes
+    })
+
+@login_required
+@csrf_exempt
+def ko_to_en_multiple(request):
+    user = request.user
+    studied_words = Word.objects.filter(
+        study_progress__user=user,
+        study_progress__review_count__gt=0
+    ).distinct()
+    if studied_words.count() < 15:
+        messages.warning(request, '테스트를 위해서는 최소 15개의 단어를 학습해야 합니다.')
+        return redirect('quiz:quiz_home')
+
+    if request.method == 'POST':
+        questions = request.session.get('ko_to_en_multiple_questions', [])
+        user_answers = [request.POST.get(f'answer_{i+1}', '') for i in range(len(questions))]
+        correct_count = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="한국어 → 영어 객관식",
+            quiz_type='ko_to_en',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, q in enumerate(questions):
+            correct = user_answers[i] == q['answer']
+            correct_count += int(correct)
+            
+            # 단어 찾기
+            word = Word.objects.get(korean=q['question'])
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=user_answers[i],
+                is_correct=correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=correct,
+            )
+            
+            results.append({
+                'question': q['question'],
+                'answer': q['answer'],
+                'user_answer': user_answers[i],
+                'is_correct': correct
+            })
+            
+        score = int(correct_count / len(questions) * 100)
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            quiz_type='ko_to_en',
+            mode='multiple',
+            score=score,
+            total_questions=len(questions),
+            correct_answers=correct_count,
+            completed_at=timezone.now()
+        )
+        
+        return render(request, 'quiz/ko_to_en_multiple_result.html', {
+            'results': results,
+            'score': score,
+            'correct_count': correct_count,
+            'total': len(questions),
+            'attempt': attempt
+        })
+    else:
+        import random
+        words = list(studied_words.order_by('?')[:15])
+        questions = []
+        for word in words:
+            options = list(studied_words.exclude(id=word.id).order_by('?')[:3])
+            options.append(word)
+            random.shuffle(options)
+            questions.append({
+                'question': word.korean,
+                'answer': word.english,
+                'options': [w.english for w in options]
+            })
+        request.session['ko_to_en_multiple_questions'] = questions
+        return render(request, 'quiz/ko_to_en_multiple.html', {
+            'questions': questions
+        })
+
+@login_required
+@csrf_exempt
+def ko_to_en_typing(request):
+    user = request.user
+    studied_words = Word.objects.filter(
+        study_progress__user=user,
+        study_progress__review_count__gt=0
+    ).distinct()
+    if studied_words.count() < 15:
+        messages.warning(request, '테스트를 위해서는 최소 15개의 단어를 학습해야 합니다.')
+        return redirect('quiz:quiz_home')
+
+    if request.method == 'POST':
+        # 세션에서 문제 데이터 가져오기
+        questions = request.session.get('ko_to_en_typing_questions', [])
+        if not questions or 'word_id' not in questions[0]:
+            messages.error(request, '퀴즈 세션이 만료되었습니다. 다시 시작해주세요.')
+            return redirect('quiz:quiz_home')
+            
+        user_answers = [request.POST.get(f'answer_{i+1}', '').strip() for i in range(len(questions))]
+        correct_count = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="한국어 → 영어 주관식",
+            quiz_type='ko_to_en',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, q in enumerate(questions):
+            correct = user_answers[i] == q['answer']
+            correct_count += int(correct)
+            
+            # 단어 찾기
+            word = Word.objects.get(id=q['word_id'])
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=user_answers[i],
+                is_correct=correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=correct,
+            )
+            
+            results.append({
+                'question': q['question'],
+                'answer': q['answer'],
+                'user_answer': user_answers[i],
+                'is_correct': correct
+            })
+            
+        score = int(correct_count / len(questions) * 100)
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            quiz_type='ko_to_en',
+            mode='typing',
+            score=score,
+            total_questions=len(questions),
+            correct_answers=correct_count,
+            completed_at=timezone.now()
+        )
+        
+        return render(request, 'quiz/ko_to_en_typing_result.html', {
+            'results': results,
+            'score': score,
+            'correct_count': correct_count,
+            'total': len(questions),
+            'attempt': attempt
+        })
+    else:
+        # GET 요청 시 세션 초기화
+        if 'ko_to_en_typing_questions' in request.session:
+            del request.session['ko_to_en_typing_questions']
+            
+        import random
+        words = list(studied_words.order_by('?')[:15])
+        questions = []
+        for word in words:
+            questions.append({
+                'word_id': word.id,
+                'question': word.korean,
+                'answer': word.english
+            })
+        request.session['ko_to_en_typing_questions'] = questions
+        return render(request, 'quiz/ko_to_en_typing.html', {
+            'questions': questions
+        })
+
+@login_required
+@csrf_exempt
+def bookmark_multiple(request):
+    """즐겨찾기 단어 객관식 퀴즈"""
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        score = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="즐겨찾기 객관식",
+            quiz_type='bookmark',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, answer in enumerate(data['answers']):
+            word = get_object_or_404(Word, id=answer['word_id'])
+            is_correct = answer['selected_answer'] == answer['correct_answer']
+            
+            if is_correct:
+                score += 1
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=answer['selected_answer'],
+                is_correct=is_correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=is_correct,
+            )
+            
+            results.append({
+                'word': word.english,
+                'meaning': word.korean,
+                'user_answer': answer['selected_answer'],
+                'correct_answer': answer['correct_answer'],
+                'is_correct': is_correct
+            })
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            score=score * 10,  # 100점 만점
+            total_questions=len(data['answers']),
+            correct_answers=score,
+            completed_at=timezone.now()
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'score': score * 10,
+            'correct_count': score,
+            'wrong_count': len(data['answers']) - score,
+            'results': results,
+            'attempt_id': attempt.id
+        })
+    
+    # GET 요청: 새로운 퀴즈 시작
+    # 즐겨찾기한 단어 가져오기
+    bookmarked_words = Word.objects.filter(
+        bookmarks__user=request.user
+    ).distinct()
+    
+    if bookmarked_words.count() < 10:
+        messages.warning(request, '즐겨찾기한 단어가 10개 이상 필요합니다.')
+        return redirect('quiz:quiz_home')
+    
+    # 랜덤하게 10개의 단어 선택
+    test_words = list(bookmarked_words.order_by('?')[:10])
+    questions = []
+    
+    for word in test_words:
+        # 랜덤하게 문제 유형 선택 (영한 또는 한영)
+        is_en_to_ko = random.choice([True, False])
+        
+        if is_en_to_ko:
+            question = word.english
+            answer = word.korean
+            question_type = 'en_to_ko'
+        else:
+            question = word.korean
+            answer = word.english
+            question_type = 'ko_to_en'
+        
+        # 오답 선택지 생성
+        wrong_answers = Word.objects.exclude(id=word.id).order_by('?')[:3]
+        options = [answer] + [w.korean if is_en_to_ko else w.english for w in wrong_answers]
+        random.shuffle(options)
+        
+        questions.append({
+            'word_id': word.id,
+            'question': question,
+            'answer': answer,
+            'options': options,
+            'type': question_type
+        })
+    
+    return render(request, 'quiz/bookmark_multiple.html', {
+        'questions': questions
+    })
+
+@login_required
+@csrf_exempt
+def bookmark_typing(request):
+    """즐겨찾기 단어 주관식 퀴즈"""
+    if request.method == 'POST':
+        data = json.loads(request.body)
+        score = 0
+        results = []
+        
+        # 퀴즈 생성
+        quiz = Quiz.objects.create(
+            title="즐겨찾기 주관식",
+            quiz_type='bookmark',
+            difficulty='medium',
+            created_by=request.user,
+            is_public=False
+        )
+        
+        for i, answer in enumerate(data['answers']):
+            word = get_object_or_404(Word, id=answer['word_id'])
+            is_correct = answer['user_answer'].strip().lower() == answer['correct_answer'].lower()
+            
+            if is_correct:
+                score += 1
+            
+            # 퀴즈 문제 생성
+            question = QuizQuestion.objects.create(
+                quiz=quiz,
+                word=word,
+                order=i+1,
+                user_answer=answer['user_answer'],
+                is_correct=is_correct
+            )
+            
+            # 학습 기록 저장
+            WordStudyHistory.objects.create(
+                user=request.user,
+                word=word,
+                is_correct=is_correct,
+            )
+            
+            results.append({
+                'word': word.english,
+                'meaning': word.korean,
+                'user_answer': answer['user_answer'],
+                'correct_answer': answer['correct_answer'],
+                'is_correct': is_correct
+            })
+        
+        # 퀴즈 시도 기록 저장
+        attempt = QuizAttempt.objects.create(
+            user=request.user,
+            quiz=quiz,
+            score=score * 10,  # 100점 만점
+            total_questions=len(data['answers']),
+            correct_answers=score,
+            completed_at=timezone.now()
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'score': score * 10,
+            'correct_count': score,
+            'wrong_count': len(data['answers']) - score,
+            'results': results,
+            'attempt_id': attempt.id
+        })
+    
+    # GET 요청: 새로운 퀴즈 시작
+    # 즐겨찾기한 단어 가져오기
+    bookmarked_words = Word.objects.filter(
+        bookmarks__user=request.user
+    ).distinct()
+    
+    if bookmarked_words.count() < 10:
+        messages.warning(request, '즐겨찾기한 단어가 10개 이상 필요합니다.')
+        return redirect('quiz:quiz_home')
+    
+    # 랜덤하게 10개의 단어 선택
+    test_words = list(bookmarked_words.order_by('?')[:10])
+    questions = []
+    
+    for word in test_words:
+        # 랜덤하게 문제 유형 선택 (영한 또는 한영)
+        is_en_to_ko = random.choice([True, False])
+        
+        if is_en_to_ko:
+            question = word.english
+            answer = word.korean
+            question_type = 'en_to_ko'
+        else:
+            question = word.korean
+            answer = word.english
+            question_type = 'ko_to_en'
+        
+        questions.append({
+            'word_id': word.id,
+            'question': question,
+            'answer': answer,
+            'type': question_type
+        })
+    
+    return render(request, 'quiz/bookmark_typing.html', {
+        'questions': questions
+    })

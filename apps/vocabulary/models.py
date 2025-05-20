@@ -51,10 +51,12 @@ class Word(models.Model):
         choices=PART_OF_SPEECH_CHOICES,
         default='noun'
     )
-    example_sentence = models.TextField('예문', blank=True)
-    example_translation = models.TextField('예문 번역', blank=True)
+    example_sentence = models.TextField('예문', blank=True, null=True)
+    example_translation = models.TextField('예문 번역', blank=True, null=True)
+    is_bookmarked = models.BooleanField('즐겨찾기', default=False)
     created_at = models.DateTimeField('생성일', auto_now_add=True)
     updated_at = models.DateTimeField('수정일', auto_now=True)
+    daily_word_date = models.DateField(null=True, blank=True)  # 오늘의 단어로 선택된 날짜
 
     class Meta:
         verbose_name = '단어'
@@ -98,3 +100,19 @@ class WordBookmark(models.Model):
 
     def __str__(self):
         return f"{self.user.username}의 단어 북마크: {self.word.english}"
+
+class PersonalWordList(models.Model):
+    """사용자의 개인 단어장 모델"""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='personal_word_lists')
+    word = models.ForeignKey(Word, on_delete=models.CASCADE, related_name='personal_lists')
+    created_at = models.DateTimeField('추가 일시', auto_now_add=True)
+    note = models.TextField('메모', blank=True)
+
+    class Meta:
+        verbose_name = '개인 단어장'
+        verbose_name_plural = '개인 단어장 목록'
+        unique_together = ['user', 'word']  # 사용자당 단어 중복 추가 방지
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username}의 단어장: {self.word.english}"

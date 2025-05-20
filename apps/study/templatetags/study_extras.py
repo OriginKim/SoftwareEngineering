@@ -36,4 +36,12 @@ def type(value):
 
 @register.filter
 def pprint(value):
-    return pformat(value) 
+    return pformat(value)
+
+@register.filter
+def subtract(value, arg):
+    """두 값의 차이를 반환하는 템플릿 필터"""
+    try:
+        return int(value) - int(arg)
+    except (ValueError, TypeError):
+        return value 
