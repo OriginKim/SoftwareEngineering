@@ -9,12 +9,11 @@ class CustomUserAdmin(UserAdmin):
     search_fields = ('username', 'email')
     ordering = ('username',)
 
+@admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    """사용자 프로필 관리자 설정"""
-    list_display = ('user', 'nickname', 'daily_goal', 'streak_days', 'total_studied_words')
-    list_filter = ('daily_goal',)
-    search_fields = ('user__username', 'nickname')
-    readonly_fields = ('created_at',)
+    list_display = ['user', 'nickname', 'points', 'level', 'daily_goal', 'created_at']
+    search_fields = ['user__username', 'nickname']
+    list_filter = ['level', 'daily_goal']
+    ordering = ['-created_at']
 
 admin.site.register(CustomUser, CustomUserAdmin)
-admin.site.register(UserProfile, UserProfileAdmin)

@@ -351,6 +351,22 @@ def quiz_start(request, quiz_id):
     
     return render(request, 'quiz/quiz_submit.html', context)
 
+def calculate_quiz_points(score, quiz_type, mode):
+    """퀴즈 점수에 따른 포인트 계산"""
+    base_points = {
+        'multiple': 10,  # 객관식 문제당 10포인트
+        'typing': 15,    # 주관식 문제당 15포인트
+    }
+    
+    # 기본 포인트 계산
+    points = score * base_points.get(mode, 10)
+    
+    # 퀴즈 타입별 보너스
+    if quiz_type == 'ko_to_en':
+        points = int(points * 1.2)  # 한→영 퀴즈는 20% 보너스
+    
+    return points
+
 @login_required
 def quiz_submit(request, quiz_id):
     """퀴즈 답안 제출 뷰"""
@@ -405,6 +421,10 @@ def quiz_submit(request, quiz_id):
             # 모든 문제를 다 풀었을 때
             correct_count = questions.filter(is_correct=True).count()
             score = (correct_count / questions.count()) * 100
+            
+            # 퀴즈 완료 시 포인트 지급
+            points = calculate_quiz_points(correct_count, quiz.quiz_type, quiz.mode)
+            request.user.profile.add_points(points, f"{quiz.get_quiz_type_display()} 퀴즈 완료")
             
             # 퀴즈 시도 기록 저장
             attempt = QuizAttempt.objects.create(
@@ -645,6 +665,10 @@ def en_to_ko_multiple(request):
             completed_at=timezone.now()
         )
         
+        # 포인트 지급
+        points = calculate_quiz_points(correct_count, 'en_to_ko', 'multiple')
+        request.user.profile.add_points(points, "영→한 객관식 퀴즈 완료")
+        
         # 세션 데이터 삭제
         if 'en_to_ko_multiple_questions' in request.session:
             del request.session['en_to_ko_multiple_questions']
@@ -755,9 +779,9 @@ def en_to_ko_typing(request):
             completed_at=timezone.now()
         )
         
-        # 세션 데이터 삭제
-        if 'en_to_ko_typing_questions' in request.session:
-            del request.session['en_to_ko_typing_questions']
+        # 포인트 지급
+        points = calculate_quiz_points(correct_count, 'en_to_ko', 'typing')
+        request.user.profile.add_points(points, "영→한 주관식 퀴즈 완료")
         
         return render(request, 'quiz/en_to_ko_typing_result.html', {
             'results': results,
@@ -785,99 +809,6 @@ def en_to_ko_typing(request):
             'questions': questions
         })
 
-@require_http_methods(["POST"])
-@login_required
-def toggle_mastered(request, note_id):
-    try:
-        note = WrongAnswerNote.objects.get(id=note_id, user=request.user)
-        note.is_mastered = not note.is_mastered
-        note.save()
-        return JsonResponse({
-            'status': 'success',
-            'is_mastered': note.is_mastered
-        })
-    except WrongAnswerNote.DoesNotExist:
-        return JsonResponse({
-            'status': 'error',
-            'message': '오답노트를 찾을 수 없습니다.'
-        }, status=404)
-
-def all_wrong_answer_notes(request):
-    notes = WrongAnswerNote.objects.filter(
-        user=request.user,
-        is_mastered=False  # 마스터하지 않은 단어만 표시
-    ).select_related('word').order_by('-created_at')
-    
-    return render(request, 'quiz/all_wrong_answer_notes.html', {
-        'notes': notes
-    })
-
-@login_required
-@require_POST
-def add_wrong_answer(request):
-    """오답 노트에 추가 (한->영, 영->한 모두 지원)"""
-    try:
-        data = json.loads(request.body)
-        question = data.get('question')
-        answer = data.get('answer')
-        user_answer = data.get('user_answer')
-
-        # 한글/영어 순서에 상관없이 단어 찾기
-        word = Word.objects.filter(
-            (Q(korean=question) & Q(english=answer)) |
-            (Q(english=question) & Q(korean=answer))
-        ).first()
-        if not word:
-            return JsonResponse({'success': False, 'error': '단어를 찾을 수 없습니다.'})
-
-        # 이미 오답 노트에 있는지 확인
-        note, created = WrongAnswerNote.objects.get_or_create(
-            user=request.user,
-            word=word,
-            defaults={
-                'question': question,
-                'correct_answer': answer,
-                'user_answer': user_answer
-            }
-        )
-
-        return JsonResponse({'success': True})
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)})
-
-@login_required
-def wrong_answer_notes(request):
-    quiz_attempt_id = request.GET.get('quiz_id')
-    if not quiz_attempt_id:
-        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
-
-    attempt = QuizAttempt.objects.filter(id=quiz_attempt_id, user=request.user).first()
-    if not attempt:
-        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
-
-    # 해당 시도의 틀린 문제만 쿼리
-    wrong_questions = QuizQuestion.objects.filter(quiz=attempt.quiz, is_correct=False)
-    # 객관식/주관식 등 quiz=None인 경우(임시 퀴즈) 처리
-    if attempt.quiz is None:
-        # quiz=None인 경우 QuizQuestion과 연결이 없으므로, WordStudyHistory 등에서 틀린 단어를 찾아야 할 수도 있음
-        # 하지만 현재 구조상 QuizQuestion이 생성되지 않으면, 틀린 단어를 알 수 없음
-        # (필요시 추가 구현)
-        wrong_questions = []
-    
-    # 각 문제별로 오답노트 등록 여부 체크
-    notes = []
-    for q in wrong_questions:
-        already_added = WrongAnswerNote.objects.filter(user=request.user, word=q.word).exists()
-        notes.append({
-            'word': q.word,
-            'already_added': already_added,
-            'question': q,
-        })
-
-    return render(request, 'quiz/wrong_answer_notes.html', {
-        'notes': notes
-    })
-
 @login_required
 @csrf_exempt
 def ko_to_en_multiple(request):
@@ -891,7 +822,12 @@ def ko_to_en_multiple(request):
         return redirect('quiz:quiz_home')
 
     if request.method == 'POST':
+        # 세션에서 문제 데이터 가져오기
         questions = request.session.get('ko_to_en_multiple_questions', [])
+        if not questions or not all('word_id' in q for q in questions):
+            messages.error(request, '퀴즈 세션이 만료되었습니다. 다시 시작해주세요.')
+            return redirect('quiz:quiz_home')
+            
         user_answers = [request.POST.get(f'answer_{i+1}', '') for i in range(len(questions))]
         correct_count = 0
         results = []
@@ -910,7 +846,7 @@ def ko_to_en_multiple(request):
             correct_count += int(correct)
             
             # 단어 찾기
-            word = Word.objects.get(korean=q['question'])
+            word = Word.objects.get(id=q['word_id'])
             
             # 퀴즈 문제 생성
             question = QuizQuestion.objects.create(
@@ -931,6 +867,7 @@ def ko_to_en_multiple(request):
             results.append({
                 'question': q['question'],
                 'answer': q['answer'],
+                'options': q['options'],
                 'user_answer': user_answers[i],
                 'is_correct': correct
             })
@@ -949,6 +886,14 @@ def ko_to_en_multiple(request):
             completed_at=timezone.now()
         )
         
+        # 포인트 지급
+        points = calculate_quiz_points(correct_count, 'ko_to_en', 'multiple')
+        request.user.profile.add_points(points, "한→영 객관식 퀴즈 완료")
+        
+        # 세션 데이터 삭제
+        if 'ko_to_en_multiple_questions' in request.session:
+            del request.session['ko_to_en_multiple_questions']
+        
         return render(request, 'quiz/ko_to_en_multiple_result.html', {
             'results': results,
             'score': score,
@@ -957,6 +902,10 @@ def ko_to_en_multiple(request):
             'attempt': attempt
         })
     else:
+        # GET 요청 시 세션 초기화
+        if 'ko_to_en_multiple_questions' in request.session:
+            del request.session['ko_to_en_multiple_questions']
+            
         import random
         words = list(studied_words.order_by('?')[:15])
         questions = []
@@ -965,6 +914,7 @@ def ko_to_en_multiple(request):
             options.append(word)
             random.shuffle(options)
             questions.append({
+                'word_id': word.id,
                 'question': word.korean,
                 'answer': word.english,
                 'options': [w.english for w in options]
@@ -1049,6 +999,10 @@ def ko_to_en_typing(request):
             correct_answers=correct_count,
             completed_at=timezone.now()
         )
+        
+        # 포인트 지급
+        points = calculate_quiz_points(correct_count, 'ko_to_en', 'typing')
+        request.user.profile.add_points(points, "한→영 주관식 퀴즈 완료")
         
         return render(request, 'quiz/ko_to_en_typing_result.html', {
             'results': results,
@@ -1135,12 +1089,12 @@ def bookmark_multiple(request):
             completed_at=timezone.now()
         )
         
+        # 포인트 지급
+        points = calculate_quiz_points(score, 'bookmark', 'multiple')
+        request.user.profile.add_points(points, "즐겨찾기 객관식 퀴즈 완료")
+        
         return JsonResponse({
             'success': True,
-            'score': score * 10,
-            'correct_count': score,
-            'wrong_count': len(data['answers']) - score,
-            'results': results,
             'attempt_id': attempt.id
         })
     
@@ -1247,12 +1201,12 @@ def bookmark_typing(request):
             completed_at=timezone.now()
         )
         
+        # 포인트 지급
+        points = calculate_quiz_points(score, 'bookmark', 'typing')
+        request.user.profile.add_points(points, "즐겨찾기 주관식 퀴즈 완료")
+        
         return JsonResponse({
             'success': True,
-            'score': score * 10,
-            'correct_count': score,
-            'wrong_count': len(data['answers']) - score,
-            'results': results,
             'attempt_id': attempt.id
         })
     
@@ -1292,4 +1246,123 @@ def bookmark_typing(request):
     
     return render(request, 'quiz/bookmark_typing.html', {
         'questions': questions
+    })
+
+@require_http_methods(["POST"])
+@login_required
+def toggle_mastered(request, note_id):
+    """마스터 버튼 클릭 시 오답노트에서 삭제"""
+    try:
+        note = WrongAnswerNote.objects.get(id=note_id, user=request.user)
+        note.delete()  # 마스터 버튼 클릭 시 항목 삭제
+        return JsonResponse({
+            'status': 'success',
+            'message': '오답노트에서 삭제되었습니다.'
+        })
+    except WrongAnswerNote.DoesNotExist:
+        return JsonResponse({
+            'status': 'error',
+            'message': '오답노트를 찾을 수 없습니다.'
+        }, status=404)
+    except Exception as e:
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        }, status=500)
+
+@login_required
+def all_wrong_answer_notes(request):
+    """전체 오답노트 보기"""
+    # 사용자의 모든 오답노트를 가져옴
+    notes = WrongAnswerNote.objects.filter(
+        user=request.user
+    ).select_related('word').order_by('-created_at')
+    
+    # 페이지네이션
+    page = request.GET.get('page', 1)
+    paginator = Paginator(notes, 10)  # 한 페이지에 10개씩 표시
+    notes_page = paginator.get_page(page)
+    
+    context = {
+        'notes': notes_page,
+        'paginator': paginator,
+    }
+    
+    return render(request, 'quiz/all_wrong_answer_notes.html', context)
+
+@login_required
+@require_POST
+def add_wrong_answer(request):
+    """오답 노트에 추가 (한->영, 영->한 모두 지원)"""
+    try:
+        data = json.loads(request.body)
+        question = data.get('question')
+        answer = data.get('answer')
+        user_answer = data.get('user_answer')
+
+        # 단어 찾기 (정확한 매칭)
+        word = None
+        if question in [w.english for w in Word.objects.all()]:
+            word = Word.objects.get(english=question)
+        elif question in [w.korean for w in Word.objects.all()]:
+            word = Word.objects.get(korean=question)
+        
+        if not word:
+            return JsonResponse({'success': False, 'error': '단어를 찾을 수 없습니다.'})
+
+        # 이미 오답 노트에 있는지 확인
+        existing_note = WrongAnswerNote.objects.filter(
+            user=request.user,
+            word=word,
+            question=question,
+            correct_answer=answer
+        ).first()
+
+        if existing_note:
+            return JsonResponse({'success': True, 'message': '이미 오답노트에 있는 단어입니다.'})
+
+        # 새로운 오답노트 생성
+        WrongAnswerNote.objects.create(
+            user=request.user,
+            word=word,
+            question=question,
+            correct_answer=answer,
+            user_answer=user_answer
+        )
+
+        return JsonResponse({'success': True})
+    except Exception as e:
+        return JsonResponse({'success': False, 'error': str(e)})
+
+@login_required
+def wrong_answer_notes(request):
+    quiz_attempt_id = request.GET.get('quiz_id')
+    if not quiz_attempt_id:
+        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
+
+    attempt = QuizAttempt.objects.filter(id=quiz_attempt_id, user=request.user).first()
+    if not attempt:
+        return render(request, 'quiz/wrong_answer_notes.html', {'notes': []})
+
+    # 해당 시도의 틀린 문제만 쿼리
+    wrong_questions = QuizQuestion.objects.filter(quiz=attempt.quiz, is_correct=False)
+    # 객관식/주관식 등 quiz=None인 경우(임시 퀴즈) 처리
+    if attempt.quiz is None:
+        # quiz=None인 경우 QuizQuestion과 연결이 없으므로, WordStudyHistory 등에서 틀린 단어를 찾아야 할 수도 있음
+        # 하지만 현재 구조상 QuizQuestion이 생성되지 않으면, 틀린 단어를 알 수 없음
+        # (필요시 추가 구현)
+        wrong_questions = []
+    
+    # 각 문제별로 오답노트 등록 여부 체크
+    notes = []
+    for q in wrong_questions:
+        already_added = WrongAnswerNote.objects.filter(user=request.user, word=q.word).exists()
+        notes.append({
+            'word': q.word,
+            'already_added': already_added,
+            'question': q,
+        })
+
+    return render(request, 'quiz/wrong_answer_notes.html', {
+        'notes': notes
     })

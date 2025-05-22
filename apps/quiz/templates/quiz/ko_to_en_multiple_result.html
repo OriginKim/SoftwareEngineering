@@ -201,6 +201,9 @@
                         <h3 class="h5 text-muted">
                             {{ correct_count }}개 정답 / 총 {{ total }}문제
                         </h3>
+                        <a href="{% url 'quiz:all_wrong_answer_notes' %}" class="btn btn-outline-primary mt-3">
+                            <i class="fas fa-book me-2"></i>오답노트 보기
+                        </a>
                     </div>
 
                     <hr class="my-4">
@@ -246,7 +249,7 @@
                             <i class="fas fa-redo"></i>
                             다시 풀기
                         </a>
-                        <a href="{% url 'quiz:wrong_answer_notes' %}" class="action-btn home-btn">
+                        <a href="{% url 'quiz:all_wrong_answer_notes' %}" class="action-btn home-btn">
                             <i class="fas fa-book"></i>
                             오답 노트 보기
                         </a>

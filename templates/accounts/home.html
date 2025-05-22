@@ -90,7 +90,18 @@
                 <div class="card-body">
                     <p>총 학습 단어: {{ total_studied_words }}개</p>
                     <p>현재 레벨: {{ user_profile.level }}</p>
-                    <p>경험치: {{ user_profile.experience }}/100</p>
+                    <div class="level-progress mb-3">
+                        <div class="progress mb-2">
+                            <div class="progress-bar" role="progressbar" 
+                                 style="width: {% widthratio user_profile.points user_profile.points_to_next_level 100 %}%;" 
+                                 aria-valuenow="{{ user_profile.points }}" 
+                                 aria-valuemin="0" aria-valuemax="{{ user_profile.points_to_next_level }}"></div>
+                        </div>
+                        <div class="d-flex justify-content-between">
+                            <small class="text-muted">포인트: {{ user_profile.points }}/{{ user_profile.points_to_next_level }}</small>
+                            <small class="text-muted">다음 레벨까지: {{ user_profile.points_to_next_level|subtract:user_profile.points }} 포인트</small>
+                        </div>
+                    </div>
                     <a href="{% url 'study:statistics' %}" class="btn btn-primary">자세히 보기</a>
                 </div>
             </div>

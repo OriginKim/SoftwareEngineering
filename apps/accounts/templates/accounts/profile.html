@@ -124,31 +124,28 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-4">
-                                <h6 class="text-muted mb-3">현재 경험치</h6>
+                                <h6 class="text-muted mb-3">현재 포인트</h6>
                                 <div class="progress rounded-pill" style="height: 25px; background-color: #f0f0f0;">
-                                    <div class="progress-bar rounded-pill {% if user.profile.level < 3 %}bg-secondary{% elif user.profile.level < 5 %}bg-success{% elif user.profile.level < 7 %}bg-info{% else %}bg-warning{% endif %}" 
+                                    <div class="progress-bar rounded-pill bg-primary" 
                                          role="progressbar" 
-                                         style="width: {{ user.profile.experience|calculate_progress:user.profile.get_required_exp }}%;" 
-                                         aria-valuenow="{{ user.profile.experience }}" 
+                                         style="width: {{ user.profile.points|div:user.profile.points_to_next_level|mul:100 }}%;" 
+                                         aria-valuenow="{{ user.profile.points }}" 
                                          aria-valuemin="0" 
-                                         aria-valuemax="{{ user.profile.get_required_exp }}">
-                                        <span class="fw-bold">{{ user.profile.experience }}/{{ user.profile.get_required_exp }}</span>
+                                         aria-valuemax="{{ user.profile.points_to_next_level }}">
+                                        <span class="fw-bold">{{ user.profile.points }}/{{ user.profile.points_to_next_level }}</span>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="mb-4">
-                                <h6 class="text-muted mb-3">다음 레벨까지</h6>
-                                <h4 class="mb-0 fw-bold text-primary">{{ user.profile.get_required_exp|sub:user.profile.experience }} XP 필요</h4>
+                                <small class="text-muted mt-2 d-block">다음 레벨까지 {{ user.profile.points_to_next_level|sub:user.profile.points }} 포인트 필요</small>
                             </div>
                             <div class="mb-3">
-                                <h6 class="text-muted mb-3">획득 가능한 경험치</h6>
+                                <h6 class="text-muted mb-3">포인트 획득 방법</h6>
                                 <div class="list-group">
                                     <div class="list-group-item border-0 bg-light mb-2 rounded-3">
                                         <div class="d-flex align-items-center">
                                             <i class="fas fa-check-circle text-success me-3"></i>
                                             <div>
                                                 <h6 class="mb-0">단어 학습 완료</h6>
-                                                <small class="text-muted">+5 XP</small>
+                                                <small class="text-muted">+5 포인트</small>
                                             </div>
                                         </div>
                                     </div>
@@ -156,8 +153,8 @@
                                         <div class="d-flex align-items-center">
                                             <i class="fas fa-check-circle text-success me-3"></i>
                                             <div>
-                                                <h6 class="mb-0">퀴즈 정답</h6>
-                                                <small class="text-muted">+3 XP</small>
+                                                <h6 class="mb-0">한→영 객관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+180 포인트 (20% 보너스)</small>
                                             </div>
                                         </div>
                                     </div>
@@ -165,8 +162,35 @@
                                         <div class="d-flex align-items-center">
                                             <i class="fas fa-check-circle text-success me-3"></i>
                                             <div>
-                                                <h6 class="mb-0">일일 목표 달성</h6>
-                                                <small class="text-muted">+10 XP</small>
+                                                <h6 class="mb-0">한→영 주관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+270 포인트 (20% 보너스)</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="list-group-item border-0 bg-light mb-2 rounded-3">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-check-circle text-success me-3"></i>
+                                            <div>
+                                                <h6 class="mb-0">영→한 객관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+150 포인트</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="list-group-item border-0 bg-light mb-2 rounded-3">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-check-circle text-success me-3"></i>
+                                            <div>
+                                                <h6 class="mb-0">영→한 주관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+225 포인트</small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="list-group-item border-0 bg-light mb-2 rounded-3">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-check-circle text-success me-3"></i>
+                                            <div>
+                                                <h6 class="mb-0">즐겨찾기 단어 객관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+100 포인트</small>
                                             </div>
                                         </div>
                                     </div>
@@ -174,8 +198,8 @@
                                         <div class="d-flex align-items-center">
                                             <i class="fas fa-check-circle text-success me-3"></i>
                                             <div>
-                                                <h6 class="mb-0">연속 학습일 달성</h6>
-                                                <small class="text-muted">+15 XP</small>
+                                                <h6 class="mb-0">즐겨찾기 단어 주관식 퀴즈 완료</h6>
+                                                <small class="text-muted">+150 포인트</small>
                                             </div>
                                         </div>
                                     </div>

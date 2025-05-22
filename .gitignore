@@ -38,15 +38,23 @@ env/
 *.swp
 *.swo
 
+# OS
+.DS_Store
+Thumbs.db
+
 # Environment variables
 .env
+.env.local
+.env.*.local
 
-# macOS
-.DS_Store
-.AppleDouble
-.LSOverride
+# Static files
+staticfiles/
 
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
+# Coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover

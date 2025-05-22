@@ -88,68 +88,22 @@ def get_todays_word():
 
 @login_required
 def study_home(request):
+    """학습 홈 뷰"""
     user_profile = request.user.profile
-    today = timezone.localtime().date()
+    study_plans = StudyPlan.objects.filter(user=request.user).order_by('-created_at')
     
-    # 오늘의 학습 통계
-    today_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
-    today_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+    # 오늘의 단어 가져오기
+    todays_word = get_todays_word()
     
+    # 오늘 학습한 단어 수 (고유 단어 기준)
+    today = timezone.now().date()
     today_words = StudyProgress.objects.filter(
         user=request.user,
-        last_reviewed__range=(today_start, today_end)
+        last_reviewed__date=today,
+        review_count__gt=0
     ).count()
     
-    logger.info(f"[DEBUG] today_words: {today_words}")
-    
-    # 누적 통계
-    total_words_studied = StudyProgress.objects.filter(user=request.user, review_count__gt=0).count()
-    mastered_words = StudyProgress.objects.filter(user=request.user, proficiency=5).count()
-    needs_review = StudyProgress.objects.filter(user=request.user, proficiency__lt=5, review_count__gt=0).count()
-    total_study_minutes = StudySession.objects.filter(user=request.user, end_time__isnull=False).aggregate(total=Sum('study_minutes'))['total'] or 0
-    total_study_hours = round(total_study_minutes / 60, 1)
-    
-    # 주간/월간 학습 데이터
-    week_ago = today - timedelta(days=6)
-    month_ago = today - timedelta(days=29)
-    
-    week_counts = defaultdict(int)
-    month_counts = defaultdict(int)
-    accuracy_week = defaultdict(list)
-    
-    progresses = StudyProgress.objects.filter(user=request.user, review_count__gt=0)
-    for p in progresses:
-        reviewed_local = timezone.localtime(p.last_reviewed)
-        reviewed_date = reviewed_local.date()
-        if week_ago <= reviewed_date <= today:
-            week_counts[reviewed_date] += 1
-            accuracy_week[reviewed_date].append(p.proficiency)
-        if month_ago <= reviewed_date <= today:
-            month_counts[reviewed_date] += 1
-    
-    # 주간 데이터 리스트화
-    week_dates = [week_ago + timedelta(days=i) for i in range(7)]
-    weekly_counts = [week_counts[d] for d in week_dates]
-    weekly_labels = [d.strftime('%m-%d') for d in week_dates]
-    
-    # 월간 데이터 리스트화
-    month_dates = [month_ago + timedelta(days=i) for i in range(30)]
-    monthly_counts = [month_counts[d] for d in month_dates]
-    monthly_labels = [d.strftime('%m-%d') for d in month_dates]
-    
-    # 주간 정확도
-    accuracy_data = []
-    for d in week_dates:
-        if accuracy_week[d]:
-            avg = sum(accuracy_week[d]) / len(accuracy_week[d])
-            accuracy_data.append(round(avg, 1))
-        else:
-            accuracy_data.append(0)
-    
-    # 이번 주 달성률 계산
-    weekly_achievement_rate = min(100, int((sum(weekly_counts) / (7 * user_profile.daily_goal) * 100))) if user_profile.daily_goal > 0 else 0
-    
-    # 연속 학습일 계산
+    # 연속 출석일 계산
     streak_days = 0
     current_date = today
     while True:
@@ -160,77 +114,39 @@ def study_home(request):
         ).exists()
         if has_study:
             streak_days += 1
-            current_date -= timedelta(days=1)
+            current_date -= timezone.timedelta(days=1)
         else:
             break
     
-    # user_profile에 streak_days와 weekly_achievement_rate 저장
-    user_profile.streak_days = streak_days
-    user_profile.weekly_achievement_rate = weekly_achievement_rate
-    user_profile.save()
+    # 주간 달성률 계산 (고유 단어 수 기준)
+    week_start = today - timezone.timedelta(days=today.weekday())
+    week_end = week_start + timezone.timedelta(days=6)
     
-    # 일일 목표 설정 (프로필의 daily_goal을 우선적으로 사용)
-    daily_goal = DailyGoal.objects.filter(
+    weekly_goals = user_profile.daily_goal * 7
+    weekly_achieved = StudyProgress.objects.filter(
         user=request.user,
-        date=today
-    ).first()
+        last_reviewed__date__range=[week_start, week_end],
+        review_count__gt=0
+    ).count()
     
-    if not daily_goal:
-        daily_goal = DailyGoal.objects.create(
-            user=request.user,
-            date=today,
-            words=user_profile.daily_goal or 20,  # 기본값 20 설정
-            study_time=5  # 기본값 5분 설정 (필드 참조 제거)
-        )
-    else:
-        # 프로필의 목표가 변경되었다면 DailyGoal도 업데이트
-        if daily_goal.words != user_profile.daily_goal:
-            daily_goal.words = user_profile.daily_goal or 20  # 기본값 20 설정
-            daily_goal.save()
+    weekly_achievement_rate = min(100, int((weekly_achieved / weekly_goals) * 100)) if weekly_goals > 0 else 0
     
-    logger.info(f"[DEBUG] daily_goal.words: {daily_goal.words}")
-    
-    # 학습 진행률 계산 (0으로 나누기 방지)
-    progress = {
-        'words': min(100, (today_words / daily_goal.words * 100) if daily_goal.words > 0 else 0)
-    }
-    
-    logger.info(f"[DEBUG] progress.words: {progress['words']}")
-    
-    # 일일 달성률 계산
-    daily_achievement = min(100, int((today_words / daily_goal.words * 100))) if daily_goal.words > 0 else 0
+    # 경험치 계산 (학습한 단어 수 * 10)
+    experience = StudyProgress.objects.filter(
+        user=request.user,
+        review_count__gt=0
+    ).count() * 10
     
     context = {
         'user_profile': user_profile,
-        'daily_goal': daily_goal,
+        'study_plans': study_plans,
         'today_words': today_words,
-        'progress': progress,
-        'total_studied_words': total_words_studied,
-        'mastered_words': mastered_words,
-        'needs_review': needs_review,
-        'total_study_hours': total_study_hours,
-        'weekly_counts': weekly_counts,
-        'weekly_labels': weekly_labels,
-        'monthly_counts': monthly_counts,
-        'monthly_labels': monthly_labels,
-        'accuracy_data': accuracy_data,
-        'daily_achievement': daily_achievement,
-        'today_words_studied': today_words,
-        'todays_word': get_todays_word(),
-        'notifications': StudyNotification.objects.filter(
-            user=request.user,
-            is_read=False
-        ).order_by('-created_at')[:5],
-        'wrong_answer_notes': WrongAnswerNote.objects.filter(
-            user=request.user
-        ).select_related('word').order_by('-created_at')[:5],
-        'study_plans': StudyPlan.objects.filter(user=request.user).order_by('-is_active', '-created_at'),
+        'total_studied_words': StudyProgress.objects.filter(user=request.user, review_count__gt=0).count(),
+        'weekly_achievement_rate': weekly_achievement_rate,
         'streak_days': streak_days,
-        'debug_info': {
-            'today_words': today_words,
-            'daily_goal_words': daily_goal.words,
-            'progress_words': progress['words']
-        }
+        'daily_goal': user_profile.daily_goal,
+        'experience': experience,
+        'todays_word': todays_word,  # 오늘의 단어 추가
     }
     
     return render(request, 'study/home.html', context)
@@ -1339,3 +1255,25 @@ def plan_deactivate(request, plan_id):
         messages.success(request, '학습 계획이 비활성화되었습니다.')
     
     return redirect('study:home')
+
+@login_required
+def study_complete(request, word_id):
+    """단어 학습 완료 처리"""
+    word = get_object_or_404(Word, id=word_id)
+    progress = StudyProgress.objects.get_or_create(
+        user=request.user,
+        word=word
+    )[0]
+    
+    # 학습 완료 처리
+    progress.review_count += 1
+    progress.last_reviewed = timezone.now()
+    progress.save()
+    
+    # 포인트 지급
+    request.user.profile.add_points(5, "단어 학습 완료")
+    
+    # 연속 학습일 체크
+    check_streak(request.user)
+    
+    return JsonResponse({'status': 'success'})

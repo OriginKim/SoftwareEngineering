@@ -33,56 +33,50 @@ class CustomUser(AbstractUser):
 
 class UserProfile(models.Model):
     """사용자 프로필 모델"""
-    LEVEL_CHOICES = [
-        (1, '초보자'),
-        (2, '학습자'),
-        (3, '중급자'),
-        (4, '상급자'),
-        (5, '전문가')
-    ]
-    
     user = models.OneToOneField(CustomUser, on_delete=models.CASCADE, related_name='profile')
-    nickname = models.CharField('닉네임', max_length=50, blank=True)
-    bio = models.TextField('자기소개', blank=True)
-    daily_goal = models.IntegerField('일일 목표', default=10)
-    dark_mode = models.BooleanField('다크모드', default=False)
-    created_at = models.DateTimeField('가입일', auto_now_add=True)
-    last_study_date = models.DateField('마지막 학습일', null=True, blank=True)
-    streak_days = models.IntegerField('연속 학습일', default=0)
-    total_studied_words = models.IntegerField('총 학습 단어 수', default=0)
-    experience = models.IntegerField('경험치', default=0)
-    level = models.IntegerField('레벨', choices=LEVEL_CHOICES, default=1)
+    nickname = models.CharField(max_length=50, blank=True, null=True)
+    bio = models.TextField(max_length=500, blank=True, null=True)
+    points = models.IntegerField(default=0)
+    level = models.IntegerField(default=1)
+    daily_goal = models.IntegerField(default=15)
+    dark_mode = models.BooleanField(default=False)
+    experience = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    points_to_next_level = models.IntegerField(default=100)
 
-    class Meta:
-        verbose_name = '프로필'
-        verbose_name_plural = '프로필'
-
-    def __str__(self):
-        return f"{self.user.username}의 프로필"
-        
-    def get_required_exp(self):
-        """다음 레벨까지 필요한 경험치를 반환"""
-        # 레벨별 필요 경험치 계산 (레벨이 올라갈수록 더 많은 경험치 필요)
-        return self.level * 100
-        
-    def get_level_display(self):
-        """현재 레벨의 한글 표시를 반환"""
-        return dict(self.LEVEL_CHOICES)[self.level]
-        
-    def add_experience(self, amount):
-        """경험치를 추가하고 레벨업 체크"""
-        self.experience += amount
+    def add_points(self, amount, reason):
+        """포인트 추가 및 레벨 업 체크"""
+        self.points += amount
+        self.experience = min(100, self.experience + amount)
         self.check_level_up()
         self.save()
         
+        # 포인트 내역 기록
+        PointHistory.objects.create(
+            user=self.user,
+            amount=amount,
+            reason=reason
+        )
+
     def check_level_up(self):
-        """경험치가 충분하면 레벨업"""
-        required_exp = self.get_required_exp()
-        if self.experience >= required_exp and self.level < 5:
+        """포인트에 따른 레벨 업 체크"""
+        required_points = self.get_required_points()
+        while self.points >= required_points:
             self.level += 1
-            self.experience -= required_exp
-            return True
-        return False
+            required_points = self.get_required_points()
+
+    def get_required_points(self):
+        """다음 레벨까지 필요한 포인트 계산"""
+        return self.level * 1000  # 레벨당 1000포인트 필요
+
+    @property
+    def points_to_next_level(self):
+        """다음 레벨까지 필요한 포인트"""
+        return self.get_required_points()
+
+    def __str__(self):
+        return f"{self.user.username}'s profile"
 
 @receiver(post_save, sender=CustomUser)
 def create_user_profile(sender, instance, created, **kwargs):
@@ -131,3 +125,18 @@ class Attendance(models.Model):
         
         logger.debug("====== 출석 기록 저장 종료 ======")
         super().save(*args, **kwargs)
+
+class PointHistory(models.Model):
+    """포인트 획득/차감 기록"""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, related_name='point_histories')
+    amount = models.IntegerField('포인트')
+    reason = models.CharField('사유', max_length=100)
+    created_at = models.DateTimeField('획득일시', auto_now_add=True)
+
+    class Meta:
+        verbose_name = '포인트 기록'
+        verbose_name_plural = '포인트 기록 목록'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user.username}의 포인트 기록 - {self.amount}점 ({self.reason})"
