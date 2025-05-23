@@ -143,10 +143,10 @@
                                 <div class="mb-3">
                                     <div class="progress mb-3" style="height: 25px; background-color: #e9ecef;">
                                         <div class="progress-bar" role="progressbar" 
-                                             style="width: {% if daily_goal > 0 %}{% widthratio 10 daily_goal 100 %}{% else %}0{% endif %}%; background-color: #3498db;" 
-                                             aria-valuenow="10" aria-valuemin="0" 
+                                             style="width: {% if daily_goal > 0 %}{% widthratio today_words daily_goal 100 %}{% else %}0{% endif %}%; background-color: #3498db;" 
+                                             aria-valuenow="{{ today_words }}" aria-valuemin="0" 
                                              aria-valuemax="{{ daily_goal }}">
-                                            10/{{ daily_goal }}개
+                                            {{ today_words }}/{{ daily_goal }}개
                                         </div>
                                     </div>
                                     <p class="text-muted mb-3">
@@ -154,7 +154,7 @@
                                     </p>
                                 </div>
                                 <!-- 오늘의 목표 달성 메시지 -->
-                                {% if 10 >= daily_goal %}
+                                {% if today_words >= daily_goal %}
                                 <div class="alert alert-success text-center mt-3" role="alert" style="font-size:1.1rem; width: 100%;">
                                     <i class="fas fa-trophy text-warning me-2"></i>오늘의 목표를 달성하셨습니다.<br>축하합니다!
                                 </div>
@@ -379,16 +379,16 @@
                 </a>
             </div>
             <div class="card-body">
-                {% if wrong_answer_notes %}
+                {% if wrong_answers %}
                 <div class="list-group list-group-flush">
-                    {% for note in wrong_answer_notes %}
-                    <a href="{% url 'study:review_start' note.word.id %}" 
+                    {% for wrong in wrong_answers %}
+                    <a href="{% url 'vocabulary:word_detail' wrong.word.id %}" 
                        class="list-group-item list-group-item-action border-0 py-3">
                         <div class="d-flex w-100 justify-content-between">
-                            <h5 class="mb-1" style="color: #2c3e50;">{{ note.word.english }}</h5>
-                            <small class="text-muted">{{ note.created_at|date:"Y-m-d" }}</small>
+                            <h5 class="mb-1" style="color: #2c3e50; font-weight: bold;">{{ wrong.word.english }}</h5>
+                            <small class="text-muted">{{ wrong.created_at|date:"Y-m-d" }}</small>
                         </div>
-                        <p class="mb-1" style="color: #34495e;">{{ note.word.korean }}</p>
+                        <p class="mb-1" style="color: #34495e;">{{ wrong.word.korean }}</p>
                     </a>
                     {% endfor %}
                 </div>

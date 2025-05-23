@@ -96,10 +96,18 @@ def study_home(request):
     todays_word = get_todays_word()
     
     # 오늘 학습한 단어 수 (고유 단어 기준)
-    today = timezone.now().date()
+    current_time = timezone.localtime(timezone.now())
+    today = current_time.date()
+    today_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+    today_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+    
+    # 한국 시간대로 변환
+    today_start = timezone.localtime(today_start)
+    today_end = timezone.localtime(today_end)
+    
     today_words = StudyProgress.objects.filter(
         user=request.user,
-        last_reviewed__date=today,
+        last_reviewed__range=(today_start, today_end),
         review_count__gt=0
     ).count()
     
@@ -136,6 +144,11 @@ def study_home(request):
         user=request.user,
         review_count__gt=0
     ).count() * 10
+
+    # 틀린 단어 목록 가져오기 (상위 5개)
+    wrong_answers = WrongAnswerNote.objects.filter(
+        user=request.user
+    ).select_related('word').order_by('-created_at')[:5]
     
     context = {
         'user_profile': user_profile,
@@ -146,7 +159,8 @@ def study_home(request):
         'streak_days': streak_days,
         'daily_goal': user_profile.daily_goal,
         'experience': experience,
-        'todays_word': todays_word,  # 오늘의 단어 추가
+        'todays_word': todays_word,
+        'wrong_answers': wrong_answers,  # 틀린 단어 목록 추가
     }
     
     return render(request, 'study/home.html', context)
@@ -922,25 +936,27 @@ def notification_settings(request):
 @login_required
 def review_start(request, word_id):
     """특정 단어의 복습을 시작합니다."""
-    if request.method == 'POST':
-        word = get_object_or_404(Word, id=word_id)
-        
-        # 복습 세션 생성
-        session = StudySession.objects.create(
-            user=request.user,
-            study_type='review',
-            start_time=timezone.now()
-        )
-        
-        # 복습할 단어를 세션에 추가
-        session.words.add(word)
-        
+    word = get_object_or_404(Word, id=word_id)
+    
+    # 복습 세션 생성
+    session = StudySession.objects.create(
+        user=request.user,
+        study_type='review',
+        start_time=timezone.now()
+    )
+    
+    # 복습할 단어를 세션에 추가
+    session.words.add(word)
+    
+    # AJAX 요청인 경우 JSON 응답
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         return JsonResponse({
             'success': True,
             'redirect_url': reverse('study:session_detail', args=[session.id])
         })
     
-    return JsonResponse({'success': False}, status=400)
+    # 일반 요청인 경우 세션 상세 페이지로 리다이렉트
+    return redirect('study:session_detail', session_id=session.id)
 
 def text_to_speech(request):
     """텍스트를 음성으로 변환하여 반환합니다."""
