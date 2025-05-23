@@ -43,9 +43,9 @@ urlpatterns = [
     # 알림 관련 URL
     path('notifications/', views.notification_list, name='notification_list'),
     path('notifications/settings/', views.notification_settings, name='notification_settings'),
-    path('notifications/<int:notification_id>/read/', views.notification_mark_read, name='notification_mark_read'),
-    path('notifications/read-all/', views.notification_mark_all_read, name='notification_mark_all_read'),
-    path('notifications/<int:notification_id>/delete/', views.notification_delete, name='notification_delete'),
+    path('notifications/<int:notification_id>/read/', views.mark_notification_read, name='mark_notification_read'),
+    path('notifications/mark-all-read/', views.mark_all_notifications_read, name='mark_all_notifications_read'),
+    path('notifications/<int:notification_id>/delete/', views.delete_notification, name='delete_notification'),
     path('notifications/delete-all/', views.notification_delete_all, name='notification_delete_all'),
 
     # 학습 모드 URL

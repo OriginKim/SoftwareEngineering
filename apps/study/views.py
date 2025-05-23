@@ -28,6 +28,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 from random import shuffle
 from collections import defaultdict
 import logging
+from django.views.decorators.http import require_POST
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,15 @@ def statistics(request):
     total_words_studied = StudyProgress.objects.filter(user=user, review_count__gt=0).count()
     mastered_words = StudyProgress.objects.filter(user=user, proficiency=5).count()
     needs_review = StudyProgress.objects.filter(user=user, proficiency__lt=5, review_count__gt=0).count()
+    
+    # 디버그 로그 추가
+    print(f"\n=== 학습 통계 디버깅 ===")
+    print(f"사용자: {user.username} (ID: {user.id})")
+    print(f"전체 학습 단어 수: {total_words_studied}")
+    print(f"완벽히 암기한 단어 수: {mastered_words}")
+    print(f"복습이 필요한 단어 수: {needs_review}")
+    print("=======================\n")
+    
     total_study_minutes = StudySession.objects.filter(user=user, end_time__isnull=False).aggregate(total=Sum('study_minutes'))['total'] or 0
     total_study_hours = round(total_study_minutes / 60, 1)
 
@@ -859,57 +869,53 @@ def review_schedule_update(request, schedule_id):
 
 @login_required
 def notification_list(request):
-    """알림 목록 보기"""
-    notifications = Notification.objects.filter(user=request.user)
-    return render(request, 'study/notifications.html', {
-        'notifications': notifications
-    })
+    """알림 목록 뷰"""
+    notifications = StudyNotification.objects.filter(user=request.user).order_by('-created_at')
+    
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        # AJAX 요청인 경우 JSON 응답
+        notifications_data = [{
+            'id': n.id,
+            'message': n.message,
+            'is_read': n.is_read,
+            'created_at': n.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        } for n in notifications]
+        return JsonResponse({'notifications': notifications_data})
+    else:
+        # 일반 요청인 경우 템플릿 렌더링
+        return render(request, 'study/notifications.html', {
+            'notifications': notifications
+        })
 
 @login_required
-def notification_mark_read(request, notification_id):
-    """알림을 읽음으로 표시"""
-    if request.method == 'POST':
-        notification = get_object_or_404(
-            Notification,
-            id=notification_id,
-            user=request.user
-        )
+@require_POST
+def mark_notification_read(request, notification_id):
+    """알림을 읽음으로 표시하는 뷰"""
+    try:
+        notification = StudyNotification.objects.get(id=notification_id, user=request.user)
         notification.is_read = True
         notification.save()
-        messages.success(request, '알림이 읽음으로 표시되었습니다.')
-    return redirect('study:notification_list')
+        return JsonResponse({'status': 'success'})
+    except StudyNotification.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '알림을 찾을 수 없습니다.'}, status=404)
 
 @login_required
-def notification_mark_all_read(request):
-    """모든 알림을 읽음으로 표시"""
-    if request.method == 'POST':
-        Notification.objects.filter(
-            user=request.user,
-            is_read=False
-        ).update(is_read=True)
-        messages.success(request, '모든 알림이 읽음으로 표시되었습니다.')
-    return redirect('study:notification_list')
+@require_POST
+def mark_all_notifications_read(request):
+    """모든 알림을 읽음으로 표시하는 뷰"""
+    StudyNotification.objects.filter(user=request.user, is_read=False).update(is_read=True)
+    return JsonResponse({'status': 'success'})
 
 @login_required
-def notification_delete(request, notification_id):
-    """알림 삭제"""
-    if request.method == 'POST':
-        notification = get_object_or_404(
-            Notification,
-            id=notification_id,
-            user=request.user
-        )
+@require_POST
+def delete_notification(request, notification_id):
+    """알림을 삭제하는 뷰"""
+    try:
+        notification = StudyNotification.objects.get(id=notification_id, user=request.user)
         notification.delete()
-        messages.success(request, '알림이 삭제되었습니다.')
-    return redirect('study:notification_list')
-
-@login_required
-def notification_delete_all(request):
-    """모든 알림 삭제"""
-    if request.method == 'POST':
-        Notification.objects.filter(user=request.user).delete()
-        messages.success(request, '모든 알림이 삭제되었습니다.')
-    return redirect('study:notification_list')
+        return JsonResponse({'status': 'success'})
+    except StudyNotification.DoesNotExist:
+        return JsonResponse({'status': 'error', 'message': '알림을 찾을 수 없습니다.'}, status=404)
 
 @login_required
 def notification_settings(request):
@@ -1292,4 +1298,11 @@ def study_complete(request, word_id):
     # 연속 학습일 체크
     check_streak(request.user)
     
+    return JsonResponse({'status': 'success'})
+
+@login_required
+@require_POST
+def notification_delete_all(request):
+    """모든 알림을 삭제하는 뷰"""
+    StudyNotification.objects.filter(user=request.user).delete()
     return JsonResponse({'status': 'success'})

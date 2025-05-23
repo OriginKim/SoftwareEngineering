@@ -1,6 +1,6 @@
 from django.utils import timezone
 from datetime import timedelta
-from .models import StudyProgress, StudySession, ReviewSchedule, Notification
+from .models import StudyProgress, StudySession, ReviewSchedule, Notification, UserNotificationSettings
 
 def check_and_create_review_notification(user):
     """복습 알림 체크 및 생성"""
@@ -99,4 +99,49 @@ def get_consecutive_study_days(user):
         consecutive_days += 1
         current_date -= timedelta(days=1)
 
-    return consecutive_days 
+    return consecutive_days
+
+def create_notification(user, notification_type, message):
+    """알림을 생성하는 기본 함수"""
+    # 사용자의 알림 설정 확인
+    settings = UserNotificationSettings.get_or_create_settings(user)
+    
+    # 알림 설정에 따라 알림 생성 여부 결정
+    if notification_type == 'goal' and not settings.achievement_notifications:
+        return None
+    elif notification_type == 'streak' and not settings.achievement_notifications:
+        return None
+    elif notification_type == 'mastery' and not settings.achievement_notifications:
+        return None
+    elif notification_type == 'level' and not settings.achievement_notifications:
+        return None
+    
+    # 알림 생성
+    return Notification.objects.create(
+        user=user,
+        notification_type=notification_type,
+        message=message
+    )
+
+def create_goal_notification(user, goal_type, count):
+    """학습 목표 달성 알림 생성"""
+    if goal_type == 'words':
+        message = f'축하합니다! 오늘의 단어 학습 목표 {count}개를 달성했습니다! 🎉'
+    else:  # time
+        message = f'축하합니다! 오늘의 학습 시간 목표 {count}분을 달성했습니다! ⏰'
+    return create_notification(user, 'goal', message)
+
+def create_streak_notification(user, days):
+    """연속 학습 알림 생성"""
+    message = f'대단합니다! {days}일 연속으로 학습을 완료했습니다! 🔥'
+    return create_notification(user, 'streak', message)
+
+def create_mastery_notification(user, word):
+    """단어 완벽 암기 알림 생성"""
+    message = f'축하합니다! "{word.english}" 단어를 완벽하게 암기했습니다! 🌟'
+    return create_notification(user, 'mastery', message)
+
+def create_level_notification(user, level):
+    """레벨 달성 알림 생성"""
+    message = f'축하합니다! 레벨 {level}을 달성했습니다! 🏆'
+    return create_notification(user, 'level', message) 

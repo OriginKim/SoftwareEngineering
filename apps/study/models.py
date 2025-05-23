@@ -168,30 +168,32 @@ class ReviewSchedule(models.Model):
         return f"{self.user.username}의 {self.word.english} 복습 일정"
 
 class Notification(models.Model):
-    """알림 모델"""
-    TYPE_CHOICES = [
-        ('review', '복습'),
-        ('achievement', '성취'),
-        ('reminder', '리마인더')
-    ]
-
-    user = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name='notifications'
+    NOTIFICATION_TYPES = (
+        ('goal', '학습 목표 달성'),
+        ('streak', '연속 학습 달성'),
+        ('mastery', '단어 완벽 암기'),
+        ('level', '레벨 달성'),
+        ('friend', '친구 관련'),
     )
-    type = models.CharField(max_length=20, choices=TYPE_CHOICES)
-    title = models.CharField(max_length=200)
-    message = models.TextField()
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES, default='goal')
+    message = models.CharField(max_length=255)
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ['-created_at']
 
-    def __str__(self):
-        return f"{self.user.username}의 알림: {self.title}"
+    def get_icon(self):
+        icons = {
+            'goal': '🎯',
+            'streak': '🔥',
+            'mastery': '💫',
+            'level': '🎊',
+            'friend': '👥',
+        }
+        return icons.get(self.notification_type, '🔔')
 
 class UserNotificationSettings(models.Model):
     user = models.OneToOneField(
@@ -321,10 +323,10 @@ class DailyGoal(models.Model):
 
 class StudyNotification(models.Model):
     NOTIFICATION_TYPES = (
-        ('review', '복습 알림'),
-        ('forgotten', '자주 틀리는 단어'),
-        ('achievement', '업적 달성'),
-        ('reminder', '학습 리마인더'),
+        ('goal', '학습 목표 달성'),
+        ('streak', '연속 학습 달성'),
+        ('mastery', '단어 완벽 암기'),
+        ('level', '레벨 달성'),
     )
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='study_notifications')

@@ -34,10 +34,10 @@ class ReviewScheduleAdmin(admin.ModelAdmin):
 
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
-    list_display = ('user', 'type', 'title', 'is_read', 'created_at')
-    list_filter = ('type', 'is_read', 'created_at')
-    search_fields = ('user__username', 'title', 'message')
-    ordering = ('-created_at',)
+    list_display = ['user', 'notification_type', 'message', 'is_read', 'created_at']
+    list_filter = ['notification_type', 'is_read', 'created_at']
+    search_fields = ['user__username', 'message']
+    ordering = ['-created_at']
 
 @admin.register(UserNotificationSettings)
 class UserNotificationSettingsAdmin(admin.ModelAdmin):
