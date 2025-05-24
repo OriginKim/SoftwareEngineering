@@ -33,21 +33,23 @@
         .navbar {
             background: var(--gradient-primary) !important;
             box-shadow: var(--shadow-md);
-            padding: 1rem 0;
+            padding: 0.8rem 0;
         }
 
         .navbar-brand {
             font-weight: 700;
             font-size: 1.5rem;
             color: white !important;
+            margin-right: 2rem;
         }
 
         .nav-link {
             color: rgba(255, 255, 255, 0.9) !important;
             font-weight: 500;
-            padding: 0.5rem 1rem !important;
+            padding: 0.5rem 0.8rem !important;
             border-radius: 8px;
             transition: var(--transition);
+            white-space: nowrap;
         }
 
         .nav-link:hover {
@@ -130,14 +132,39 @@
             color: #95a5a6 !important;
         }
 
-        /* 반응형 디자인 */
-        @media (max-width: 768px) {
-            .navbar-brand {
-                font-size: 1.2rem;
+        /* PC 화면에서의 최소 너비 설정 */
+        @media (min-width: 992px) {
+            .navbar-nav {
+                gap: 0.5rem;
+            }
+            
+            .container-fluid {
+                max-width: 1800px;
+                margin: 0 auto;
             }
 
-            .container {
-                padding: 0 1rem;
+            .navbar-nav.mx-auto {
+                margin-left: auto !important;
+                margin-right: auto !important;
+                display: flex;
+                justify-content: center;
+                flex: 1;
+            }
+        }
+
+        /* 모바일 화면에서의 스타일 */
+        @media (max-width: 991px) {
+            .navbar-brand {
+                font-size: 1.2rem;
+                margin-right: 1rem;
+            }
+
+            .nav-link {
+                padding: 0.5rem 1rem !important;
+            }
+
+            .navbar-nav.mx-auto {
+                margin: 1rem 0;
             }
         }
     </style>
@@ -150,7 +177,7 @@
 <body class="{% if user.is_authenticated and user.profile.dark_mode %}dark-mode{% endif %}">
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark">
-        <div class="container">
+        <div class="container-fluid px-4">
             <a class="navbar-brand" href="{% url 'accounts:home' %}">
                 <i class="fas fa-book-open me-2"></i>TOEIC 단어 학습
             </a>
@@ -158,7 +185,7 @@
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
+                <ul class="navbar-nav mx-auto">
                     <li class="nav-item">
                         <a class="nav-link {% if request.path == '/vocabulary/words/' %}active{% endif %}" href="{% url 'vocabulary:word_list' %}">
                             <i class="fas fa-book me-1"></i>단어장
