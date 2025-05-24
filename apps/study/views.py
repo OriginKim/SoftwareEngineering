@@ -427,7 +427,32 @@ def study_plan_create(request):
 def study_plan_detail(request, plan_id):
     """학습 계획 상세 보기"""
     plan = get_object_or_404(StudyPlan, id=plan_id, user=request.user)
-    return render(request, 'study/plan_detail.html', {'plan': plan})
+    
+    # 오늘의 학습 현황 (한국 시간 기준)
+    current_time = timezone.localtime(timezone.now())
+    today = current_time.date()
+    today_start = timezone.make_aware(datetime.combine(today, datetime.min.time()))
+    today_end = timezone.make_aware(datetime.combine(today, datetime.max.time()))
+    
+    # 한국 시간대로 변환
+    today_start = timezone.localtime(today_start)
+    today_end = timezone.localtime(today_end)
+    
+    # 오늘 학습한 단어 수
+    today_progress = StudyProgress.objects.filter(
+        user=request.user,
+        last_reviewed__range=(today_start, today_end),
+        review_count__gt=0
+    ).count()
+    
+    # 사용자의 일일 목표
+    daily_goal = getattr(request.user.profile, 'daily_goal', 20)  # 기본값 20
+    
+    return render(request, 'study/plan_detail.html', {
+        'plan': plan,
+        'daily_goal': daily_goal,
+        'today_progress': today_progress
+    })
 
 @login_required
 def study_plan_edit(request, plan_id):
@@ -454,6 +479,10 @@ def study_plan_edit(request, plan_id):
             plan.target_words_per_day = target_words
             plan.target_study_time = target_study_time
             plan.save()
+            
+            # daily_goal 동기화
+            request.user.profile.daily_goal = target_words
+            request.user.profile.save()
             
             messages.success(request, '학습 계획이 수정되었습니다.')
             return redirect('study:plan_detail', plan_id=plan.id)
