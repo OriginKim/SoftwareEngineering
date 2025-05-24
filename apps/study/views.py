@@ -7,7 +7,7 @@ from django.db.models.functions import TruncDate
 from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification, Friendship, FriendRequest, DailyMission, DailyMissionModalShown
 from apps.vocabulary.models import Word, PersonalWordList
 from apps.accounts.models import CustomUser
-from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote
+from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote, QuizAttempt
 from apps.accounts.models import UserProfile
 from datetime import datetime, timedelta
 from django.db.models import Sum, Count, Avg, Q, Max
@@ -282,21 +282,29 @@ def statistics(request):
     
     daily_achievement = min(int(today_words_studied / daily_goal.words * 100), 100) if daily_goal.words > 0 else 0
 
-    return render(request, 'study/statistics.html', {
+    # 최근 퀴즈 기록 가져오기
+    recent_quiz_attempts = QuizAttempt.objects.filter(
+        user=request.user,
+        completed_at__isnull=False
+    ).order_by('-completed_at')[:5]
+
+    context = {
         'total_words_studied': total_words_studied,
         'mastered_words': mastered_words,
         'needs_review': needs_review,
         'total_study_hours': total_study_hours,
-        'weekly_counts': weekly_counts,
-        'weekly_labels': weekly_labels,
-        'monthly_counts': monthly_counts,
-        'monthly_labels': monthly_labels,
-        'accuracy_data': accuracy_data,
-        'today_words_studied': today_words_studied,
-        'daily_achievement': daily_achievement,
-        'user_profile': user.profile,
         'daily_goal': daily_goal,
-    })
+        'daily_achievement': daily_achievement,
+        'today_words_studied': today_words_studied,
+        'weekly_labels': weekly_labels,
+        'weekly_counts': weekly_counts,
+        'monthly_labels': monthly_labels,
+        'monthly_counts': monthly_counts,
+        'accuracy_data': accuracy_data,
+        'recent_quiz_attempts': recent_quiz_attempts,
+    }
+    
+    return render(request, 'study/statistics.html', context)
 
 @login_required
 def daily_words(request):

@@ -131,7 +131,7 @@
                                     </td>
                                     <td>{{ attempt.completed_at|date:"Y-m-d H:i" }}</td>
                                     <td>
-                                        <a href="{% url 'quiz:quiz_history_detail' attempt.id %}" class="btn btn-sm btn-outline-info fw-bold">{{ attempt.score }}%</a>
+                                        <a href="{% url 'quiz:quiz_history_detail' attempt.id %}" class="btn btn-sm btn-outline-info fw-bold">{{ attempt.score }}점</a>
                                     </td>
                                 </tr>
                                 {% endfor %}
