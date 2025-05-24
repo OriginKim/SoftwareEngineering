@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% load study_extras %}
+{% load static %}
 
 {% block title %}TOEIC 단어 학습{% endblock %}
 
@@ -143,6 +144,20 @@
             </a>
         </div>
     </div>
+
+    <!-- 데일리 미션 섹션 -->
+    {% if not daily_mission_completed %}
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="daily-mission-container">
+                <a href="{% url 'study:daily_mission' %}" class="daily-mission-btn">
+                    <i class="fas fa-tasks"></i>
+                    <span>데일리 미션</span>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 {% else %}
     <!-- 비로그인 사용자를 위한 소개 페이지 -->
     <div class="row">
@@ -191,6 +206,26 @@
     </div>
 {% endif %}
 
+<!-- 데일리 미션 모달 -->
+<div class="modal fade" id="dailyMissionModal" tabindex="-1" aria-labelledby="dailyMissionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="dailyMissionModalLabel">데일리 미션</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>오늘의 데일리 미션을 시작하시겠습니까?</p>
+                <p class="text-muted">북마크된 단어들로 구성된 퀴즈를 풀고 포인트를 획득하세요!</p>
+            </div>
+            <div class="modal-footer">
+                <a href="{% url 'study:daily_mission' %}" class="btn btn-primary">지금 풀기</a>
+                <button type="button" class="btn btn-secondary" onclick="closeDailyMissionModal()">다음에 풀기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 function playAudio(text) {
     const audio = new Audio(`/study/text-to-speech/?text=${encodeURIComponent(text)}`);
@@ -198,5 +233,61 @@ function playAudio(text) {
         console.error('오디오 재생 중 오류 발생:', error);
     });
 }
+
+function closeDailyMissionModal() {
+    const modal = bootstrap.Modal.getInstance(document.getElementById('dailyMissionModal'));
+    if (modal) {
+        modal.hide();
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // 데일리 미션 모달 표시 여부 확인
+    {% if user.is_authenticated and not daily_mission_completed and not daily_mission_modal_shown %}
+        var dailyMissionModal = new bootstrap.Modal(document.getElementById('dailyMissionModal'));
+        dailyMissionModal.show();
+        
+        // 모달이 표시되었음을 서버에 알림
+        fetch('{% url "study:daily_mission_modal_shown" %}', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': '{{ csrf_token }}',
+                'Content-Type': 'application/json'
+            }
+        });
+    {% endif %}
+});
 </script>
+
+<style>
+.daily-mission-container {
+    position: fixed;
+    top: 80px;  /* 네비바 높이를 고려한 위치 */
+    left: 20px;
+    z-index: 1000;
+}
+
+.daily-mission-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background-color: #3498db;
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+}
+
+.daily-mission-btn:hover {
+    background-color: #2980b9;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.daily-mission-btn i {
+    font-size: 1.2em;
+}
+</style>
 {% endblock %} 

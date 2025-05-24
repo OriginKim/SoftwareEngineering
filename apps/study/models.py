@@ -369,3 +369,37 @@ class Friendship(models.Model):
 
     def __str__(self):
         return f"{self.user1.nickname} - {self.user2.nickname}"
+
+class DailyMission(models.Model):
+    """데일리 미션 모델"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='daily_missions'
+    )
+    date = models.DateField(auto_now_add=True)
+    is_completed = models.BooleanField(default=False)
+    score = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(blank=True, null=True)
+    words = models.ManyToManyField(
+        Word,
+        related_name='daily_missions'
+    )
+
+    class Meta:
+        ordering = ['-date']
+        unique_together = ['user', 'date']
+
+    def __str__(self):
+        return f"{self.user.username}의 데일리 미션 ({self.date})"
+
+class DailyMissionModalShown(models.Model):
+    """데일리 미션 모달 표시 여부를 저장하는 모델"""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    date = models.DateField(default=timezone.now)
+    shown = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'date')

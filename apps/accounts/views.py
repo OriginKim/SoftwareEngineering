@@ -12,6 +12,7 @@ from django.http import JsonResponse
 import logging
 from apps.study.views import get_todays_word
 from django.contrib.admin.views.decorators import staff_member_required
+from apps.study.models import DailyMission, DailyMissionModalShown
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +51,28 @@ def home(request):
         # 사용자의 일일 목표
         daily_goal = getattr(request.user.profile, 'daily_goal', 20)  # 기본값 20
         
+        # 데일리 미션 완료 여부 확인
+        daily_mission_completed = DailyMission.objects.filter(
+            user=request.user,
+            date=today,
+            is_completed=True
+        ).exists()
+        
+        # 데일리 미션 모달 표시 여부 확인
+        daily_mission_modal_shown = DailyMissionModalShown.objects.filter(
+            user=request.user,
+            date=today,
+            shown=True
+        ).exists()
+        
         context.update({
             'today_progress': today_progress,
             'daily_goal': daily_goal,
             'todays_word': todays_word,
             'total_studied_words': total_studied_words,
-            'user_profile': request.user.profile
+            'user_profile': request.user.profile,
+            'daily_mission_completed': daily_mission_completed,
+            'daily_mission_modal_shown': daily_mission_modal_shown
         })
     
     return render(request, 'accounts/home.html', context)

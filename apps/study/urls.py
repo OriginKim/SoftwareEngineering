@@ -4,6 +4,12 @@ from . import views
 app_name = 'study'
 
 urlpatterns = [
+    # 데일리 미션 관련 URL
+    path('daily-mission/', views.daily_mission, name='daily_mission'),
+    path('daily-mission/submit/', views.submit_daily_mission, name='submit_daily_mission'),
+    path('daily-mission/result/', views.daily_mission_result, name='daily_mission_result'),
+    path('daily-mission/modal-shown/', views.daily_mission_modal_shown, name='daily_mission_modal_shown'),
+
     # 통계 관련 URL
     path('statistics/', views.statistics, name='statistics'),
 

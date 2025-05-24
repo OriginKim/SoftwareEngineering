@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 from django.db.models.functions import TruncDate
-from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification, Friendship, FriendRequest
+from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification, Friendship, FriendRequest, DailyMission, DailyMissionModalShown
 from apps.vocabulary.models import Word, PersonalWordList
 from apps.accounts.models import CustomUser
 from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote
@@ -1519,3 +1519,217 @@ def friend_wordbook(request, friend_id):
     except Exception as e:
         messages.error(request, f'단어장을 불러오는 중 오류가 발생했습니다: {str(e)}')
         return redirect('study:friend_list')
+
+@login_required
+def daily_mission(request):
+    """데일리 미션 뷰"""
+    today = timezone.now().date()
+    
+    # 오늘의 데일리 미션 가져오기
+    daily_mission = DailyMission.objects.filter(
+        user=request.user,
+        date=today
+    ).first()
+    
+    if not daily_mission:
+        # 북마크된 단어가 있는지 확인
+        bookmarked_words = Word.objects.filter(
+            bookmarks__user=request.user
+        ).distinct()
+        
+        if bookmarked_words.count() < 5:
+            messages.warning(request, '북마크된 단어가 5개 미만입니다. 더 많은 단어를 북마크해주세요.')
+            return redirect('home')
+        
+        # 새로운 데일리 미션 생성
+        daily_mission = DailyMission.objects.create(
+            user=request.user,
+            date=today,
+            is_completed=False
+        )
+        
+        # 북마크된 단어들 중에서 무작위로 5개 선택
+        mission_words = bookmarked_words.order_by('?')[:5]
+        daily_mission.words.add(*mission_words)
+    
+    # 데일리 미션의 단어들 가져오기
+    mission_words = daily_mission.words.all()
+    
+    # 각 단어에 대한 보기 생성
+    word_choices = []
+    for word in mission_words:
+        # 해당 단어를 제외한 다른 단어들 중에서 3개를 무작위로 선택
+        other_words = Word.objects.exclude(id=word.id).order_by('?')[:3]
+        choices = list(other_words) + [word]
+        random.shuffle(choices)
+        word_choices.append({
+            'word': word,
+            'choices': choices
+        })
+    
+    context = {
+        'daily_mission': daily_mission,
+        'mission_words': mission_words,
+        'word_choices': word_choices,
+    }
+    
+    return render(request, 'study/daily_mission.html', context)
+
+@login_required
+def submit_daily_mission(request):
+    """데일리 미션 제출 처리"""
+    print("\n=== 데일리 미션 제출 시작 ===")
+    print(f"[DEBUG] 요청 메소드: {request.method}")
+    
+    if request.method == 'POST':
+        try:
+            # 오늘 날짜의 데일리 미션 가져오기
+            today = timezone.localtime().date()
+            daily_mission = DailyMission.objects.get(
+                user=request.user,
+                date=today
+            )
+            print(f"[DEBUG] 데일리 미션 ID: {daily_mission.id}")
+            
+            # 이미 완료된 미션인지 확인
+            if daily_mission.is_completed:
+                print("[DEBUG] 이미 완료된 미션입니다.")
+                return JsonResponse({
+                    'status': 'error',
+                    'message': '이미 완료한 미션입니다.'
+                })
+            
+            # 답안 처리
+            correct_count = 0
+            total_questions = daily_mission.words.count()
+            results = []
+            
+            for word in daily_mission.words.all():
+                answer_key = f'word_{word.id}'
+                if answer_key not in request.POST:
+                    print(f"[DEBUG] 답안 누락: {answer_key}")
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': '모든 문제에 답해주세요.'
+                    })
+                
+                selected_answer_id = int(request.POST[answer_key])
+                is_correct = selected_answer_id == word.id
+                if is_correct:
+                    correct_count += 1
+                
+                results.append({
+                    'word': word.english,
+                    'correct_answer': word.korean,
+                    'selected_answer': Word.objects.get(id=selected_answer_id).korean,
+                    'is_correct': is_correct
+                })
+                print(f"[DEBUG] 문제 {word.english}: {'정답' if is_correct else '오답'}")
+            
+            # 점수 계산 (100점 만점)
+            score = int((correct_count / total_questions) * 100)
+            print(f"[DEBUG] 총 정답 수: {correct_count}/{total_questions}")
+            print(f"[DEBUG] 최종 점수: {score}")
+            
+            # 포인트 계산 (한 문제당 5포인트)
+            points_earned = correct_count * 5
+            print(f"[DEBUG] 획득 포인트: {points_earned}")
+            
+            # 사용자 프로필에 포인트 추가
+            user_profile = request.user.profile
+            user_profile.points += points_earned
+            user_profile.save()
+            print(f"[DEBUG] 총 포인트: {user_profile.points}")
+            
+            # 데일리 미션 완료 처리
+            daily_mission.is_completed = True
+            daily_mission.score = score
+            daily_mission.completed_at = timezone.now()
+            daily_mission.save()
+            print("[DEBUG] 데일리 미션 완료 처리 완료")
+            
+            # 결과를 세션에 저장
+            request.session['daily_mission_results'] = results
+            request.session['points_earned'] = points_earned  # 획득한 포인트도 세션에 저장
+            print("[DEBUG] 결과 세션 저장 완료")
+            
+            # 결과 페이지로 리다이렉트
+            return JsonResponse({
+                'status': 'success',
+                'redirect_url': reverse('study:daily_mission_result')
+            })
+            
+        except DailyMission.DoesNotExist:
+            print("[DEBUG] 오늘의 데일리 미션을 찾을 수 없습니다.")
+            return JsonResponse({
+                'status': 'error',
+                'message': '오늘의 데일리 미션을 찾을 수 없습니다.'
+            })
+        except Exception as e:
+            print(f"[DEBUG] 오류 발생: {str(e)}")
+            return JsonResponse({
+                'status': 'error',
+                'message': '제출 중 오류가 발생했습니다.'
+            })
+    
+    return JsonResponse({
+        'status': 'error',
+        'message': '잘못된 요청입니다.'
+    })
+
+@login_required
+def daily_mission_result(request):
+    """데일리 미션 결과 페이지"""
+    print("\n=== 데일리 미션 결과 페이지 시작 ===")
+    
+    try:
+        daily_mission = get_object_or_404(
+            DailyMission,
+            user=request.user,
+            date=timezone.localtime().date(),
+            is_completed=True
+        )
+        print(f"[DEBUG] 데일리 미션 ID: {daily_mission.id}")
+        print(f"[DEBUG] 점수: {daily_mission.score}")
+        
+        # 세션에서 결과 가져오기
+        results = request.session.get('daily_mission_results', [])
+        points_earned = request.session.get('points_earned', 0)
+        print(f"[DEBUG] 세션에서 가져온 결과 수: {len(results)}")
+        print(f"[DEBUG] 획득 포인트: {points_earned}")
+        
+        context = {
+            'daily_mission': daily_mission,
+            'total_questions': daily_mission.words.count(),
+            'correct_count': int(daily_mission.score * daily_mission.words.count() / 100),
+            'results': results,
+            'points_earned': points_earned
+        }
+        
+        # 세션에서 결과 삭제
+        if 'daily_mission_results' in request.session:
+            del request.session['daily_mission_results']
+        if 'points_earned' in request.session:
+            del request.session['points_earned']
+        print("[DEBUG] 세션에서 결과 삭제 완료")
+        
+        print("=== 데일리 미션 결과 페이지 완료 ===\n")
+        return render(request, 'study/daily_mission_result.html', context)
+        
+    except Exception as e:
+        print(f"[ERROR] 오류 발생: {str(e)}")
+        messages.error(request, '결과를 불러오는 중 오류가 발생했습니다.')
+        return redirect('accounts:home')
+
+@login_required
+def daily_mission_modal_shown(request):
+    """데일리 미션 모달이 표시되었음을 저장하는 뷰"""
+    if request.method == 'POST':
+        today = timezone.now().date()
+        DailyMissionModalShown.objects.update_or_create(
+            user=request.user,
+            date=today,
+            defaults={'shown': True}
+        )
+        return JsonResponse({'status': 'success'})
+    return JsonResponse({'status': 'error'}, status=400)

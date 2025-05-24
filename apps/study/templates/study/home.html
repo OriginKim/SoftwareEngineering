@@ -264,6 +264,45 @@
     </div>
 </div>
 
+<div class="daily-mission-container">
+    <a href="{% url 'study:daily_mission' %}" class="daily-mission-btn">
+        <i class="fas fa-tasks"></i>
+        <span>데일리 미션</span>
+    </a>
+</div>
+
+<style>
+.daily-mission-container {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    z-index: 1000;
+}
+
+.daily-mission-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background-color: #007bff;
+    color: white;
+    border-radius: 8px;
+    text-decoration: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+}
+
+.daily-mission-btn:hover {
+    background-color: #0056b3;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+}
+
+.daily-mission-btn i {
+    font-size: 1.2em;
+}
+</style>
+
 {% block extra_js %}
 <script>
 function speakText(text) {
