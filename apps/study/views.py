@@ -5,7 +5,8 @@ from django.utils import timezone
 from django.utils.dateparse import parse_time
 from django.db.models.functions import TruncDate
 from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification, Friendship, FriendRequest
-from apps.vocabulary.models import Word
+from apps.vocabulary.models import Word, PersonalWordList
+from apps.accounts.models import CustomUser
 from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote
 from apps.accounts.models import UserProfile
 from datetime import datetime, timedelta
@@ -1488,3 +1489,33 @@ def delete_friendship(request, friendship_id):
             return JsonResponse({'success': False, 'message': '친구 관계를 찾을 수 없습니다.'})
     except Exception as e:
         return JsonResponse({'success': False, 'message': '친구 관계 삭제 중 오류가 발생했습니다.'})
+
+@login_required
+def friend_wordbook(request, friend_id):
+    """친구의 단어장 페이지"""
+    try:
+        # 친구 정보 가져오기
+        friend = get_object_or_404(CustomUser, id=friend_id)
+        
+        # 친구 관계 확인
+        friendship = Friendship.objects.filter(
+            Q(user1=request.user, user2=friend) | Q(user1=friend, user2=request.user)
+        ).first()
+        
+        if not friendship:
+            messages.error(request, '친구 관계가 아닙니다.')
+            return redirect('study:friend_list')
+        
+        # 친구의 개인 단어장 단어 가져오기
+        words = PersonalWordList.objects.filter(user=friend).select_related('word').order_by('-created_at')
+        
+        context = {
+            'friend': friend,
+            'words': words,
+            'friendship': friendship
+        }
+        return render(request, 'study/friend_wordbook.html', context)
+        
+    except Exception as e:
+        messages.error(request, f'단어장을 불러오는 중 오류가 발생했습니다: {str(e)}')
+        return redirect('study:friend_list')

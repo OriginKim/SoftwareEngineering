@@ -121,6 +121,25 @@
 .friends-section-card .list-group-item .delete-btn i {
     font-size: 1.1rem;
 }
+
+.friends-section-card .list-group-item .view-wordbook-btn {
+    background: none;
+    border: none;
+    color: #0d6efd;
+    padding: 8px;
+    border-radius: 50%;
+    transition: all 0.2s;
+    margin-right: 15px;
+}
+
+.friends-section-card .list-group-item .view-wordbook-btn:hover {
+    background-color: #0d6efd;
+    color: white;
+}
+
+.friends-section-card .list-group-item .view-wordbook-btn i {
+    font-size: 1.1rem;
+}
 </style>
 
 <div class="container mx-auto px-4 py-8">
@@ -153,9 +172,14 @@
                                 경험치: {{ friend.profile.points }}
                             </small>
                         </div>
-                        <button class="delete-btn" onclick="deleteFriendship({{ friendship.id }})" title="친구 삭제">
-                            <i class="fas fa-user-minus"></i>
-                        </button>
+                        <div class="d-flex align-items-center">
+                            <button class="view-wordbook-btn" onclick="viewFriendWordbook({{ friend.id }})" title="단어장 보기">
+                                <i class="fas fa-bookmark"></i>
+                            </button>
+                            <button class="delete-btn" onclick="deleteFriendship({{ friendship.id }})" title="친구 삭제">
+                                <i class="fas fa-user-minus"></i>
+                            </button>
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
@@ -359,6 +383,10 @@ function deleteFriendship(friendshipId) {
         console.error('Error:', error);
         alert('친구 관계 삭제 중 오류가 발생했습니다.');
     });
+}
+
+function viewFriendWordbook(friendId) {
+    window.location.href = "{% url 'study:friend_wordbook' 0 %}".replace('0', friendId);
 }
 </script>
 {% endblock %} 
