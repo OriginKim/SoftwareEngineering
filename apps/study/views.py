@@ -4,7 +4,7 @@ from django.contrib import messages
 from django.utils import timezone
 from django.utils.dateparse import parse_time
 from django.db.models.functions import TruncDate
-from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification
+from .models import StudyPlan, StudySession, StudyProgress, ReviewSchedule, Notification, UserNotificationSettings, WordStudyHistory, LevelTest, UserTestResult, TestQuestion, UserLevel, DailyGoal, StudyNotification, Friendship, FriendRequest
 from apps.vocabulary.models import Word
 from apps.quiz.models import QuizAnswerHistory, WrongAnswerNote
 from apps.accounts.models import UserProfile
@@ -29,8 +29,11 @@ from random import shuffle
 from collections import defaultdict
 import logging
 from django.views.decorators.http import require_POST
+from django.contrib.auth import get_user_model
 
 logger = logging.getLogger(__name__)
+
+User = get_user_model()
 
 # Create your views here.
 
@@ -918,6 +921,13 @@ def delete_notification(request, notification_id):
         return JsonResponse({'status': 'error', 'message': '알림을 찾을 수 없습니다.'}, status=404)
 
 @login_required
+@require_POST
+def delete_all_notifications(request):
+    """모든 알림을 삭제하는 뷰"""
+    StudyNotification.objects.filter(user=request.user).delete()
+    return JsonResponse({'status': 'success'})
+
+@login_required
 def notification_settings(request):
     """알림 설정 관리"""
     settings = UserNotificationSettings.get_or_create_settings(request.user)
@@ -1301,8 +1311,180 @@ def study_complete(request, word_id):
     return JsonResponse({'status': 'success'})
 
 @login_required
+def friend_list(request):
+    """친구 목록 페이지"""
+    # 친구 목록 가져오기 (양쪽 모두 확인)
+    friendships = Friendship.objects.filter(
+        models.Q(user1=request.user) | models.Q(user2=request.user)
+    ).select_related('user1', 'user2')
+    
+    # 친구 목록을 (친구, 관계) 튜플의 리스트로 변환
+    friends_list = []
+    for friendship in friendships:
+        # 현재 사용자가 user1인 경우 user2가 친구
+        if friendship.user1 == request.user:
+            friend = friendship.user2
+        # 현재 사용자가 user2인 경우 user1이 친구
+        else:
+            friend = friendship.user1
+        friends_list.append((friend, friendship))
+    
+    # 받은 친구 요청 가져오기
+    received_requests = FriendRequest.objects.filter(
+        to_user=request.user,
+        is_accepted=False,
+        is_rejected=False
+    ).select_related('from_user')
+    
+    # 보낸 친구 요청 가져오기
+    sent_requests = FriendRequest.objects.filter(
+        from_user=request.user,
+        is_accepted=False,
+        is_rejected=False
+    ).select_related('to_user')
+    
+    context = {
+        'friends_list': friends_list,
+        'received_requests': received_requests,
+        'sent_requests': sent_requests,
+    }
+    return render(request, 'study/friends.html', context)
+
+@login_required
 @require_POST
-def notification_delete_all(request):
-    """모든 알림을 삭제하는 뷰"""
-    StudyNotification.objects.filter(user=request.user).delete()
-    return JsonResponse({'status': 'success'})
+def friend_search(request):
+    nickname = request.POST.get('nickname', '').strip()
+    if not nickname:
+        return JsonResponse({'found': False, 'message': '닉네임을 입력하세요.'})
+    try:
+        # User 모델과 UserProfile 모델 모두에서 검색
+        user = User.objects.filter(
+            models.Q(nickname=nickname) | 
+            models.Q(profile__nickname=nickname)
+        ).first()
+        
+        if user:
+            return JsonResponse({
+                'found': True,
+                'user_id': user.id,
+                'nickname': user.nickname or user.profile.nickname,
+                'level': getattr(user.profile, 'level', None),
+                'exp': getattr(user.profile, 'points', None),
+            })
+        else:
+            return JsonResponse({'found': False, 'message': '해당 닉네임의 사용자가 없습니다.'})
+    except Exception as e:
+        return JsonResponse({'found': False, 'message': '검색 중 오류가 발생했습니다.'})
+
+@login_required
+@require_POST
+def send_friend_request(request, user_id):
+    """친구 요청 보내기"""
+    try:
+        to_user = User.objects.get(id=user_id)
+        
+        # 자기 자신에게 요청할 수 없음
+        if to_user == request.user:
+            return JsonResponse({'success': False, 'message': '자기 자신에게 친구 요청을 보낼 수 없습니다.'})
+        
+        # 이미 친구인지 확인
+        if Friendship.objects.filter(
+            models.Q(user1=request.user, user2=to_user) | 
+            models.Q(user1=to_user, user2=request.user)
+        ).exists():
+            return JsonResponse({'success': False, 'message': '이미 친구입니다.'})
+        
+        # 이미 요청을 보냈는지 확인
+        if FriendRequest.objects.filter(
+            from_user=request.user,
+            to_user=to_user,
+            is_accepted=False,
+            is_rejected=False
+        ).exists():
+            return JsonResponse({'success': False, 'message': '이미 친구 요청을 보냈습니다.'})
+        
+        # 새로운 친구 요청 생성
+        FriendRequest.objects.create(
+            from_user=request.user,
+            to_user=to_user
+        )
+        
+        return JsonResponse({'success': True, 'message': '친구 신청을 보냈습니다.'})
+    except User.DoesNotExist:
+        return JsonResponse({'success': False, 'message': '대상 사용자가 존재하지 않습니다.'})
+
+@login_required
+@require_POST
+def accept_friend_request(request, request_id):
+    """친구 요청 수락"""
+    try:
+        friend_request = FriendRequest.objects.get(
+            id=request_id,
+            to_user=request.user,
+            is_accepted=False,
+            is_rejected=False
+        )
+        
+        # 친구 요청 수락 처리
+        friend_request.is_accepted = True
+        friend_request.save()
+        
+        # 친구 관계 생성 (양쪽 모두에게 표시되도록)
+        Friendship.objects.create(
+            user1=friend_request.from_user,
+            user2=friend_request.to_user
+        )
+        
+        # 상대방의 친구 요청도 수락 처리
+        reverse_request = FriendRequest.objects.filter(
+            from_user=request.user,
+            to_user=friend_request.from_user,
+            is_accepted=False,
+            is_rejected=False
+        ).first()
+        
+        if reverse_request:
+            reverse_request.is_accepted = True
+            reverse_request.save()
+        
+        return JsonResponse({'success': True, 'message': '친구 요청을 수락했습니다.'})
+    except FriendRequest.DoesNotExist:
+        return JsonResponse({'success': False, 'message': '친구 요청을 찾을 수 없습니다.'})
+
+@login_required
+@require_POST
+def reject_friend_request(request, request_id):
+    """친구 요청 거절"""
+    try:
+        friend_request = FriendRequest.objects.get(
+            id=request_id,
+            to_user=request.user,
+            is_accepted=False,
+            is_rejected=False
+        )
+        
+        friend_request.is_rejected = True
+        friend_request.save()
+        
+        return JsonResponse({'success': True, 'message': '친구 요청을 거절했습니다.'})
+    except FriendRequest.DoesNotExist:
+        return JsonResponse({'success': False, 'message': '친구 요청을 찾을 수 없습니다.'})
+
+@login_required
+@require_POST
+def delete_friendship(request, friendship_id):
+    """친구 관계 삭제"""
+    try:
+        friendship = Friendship.objects.filter(
+            id=friendship_id
+        ).filter(
+            models.Q(user1=request.user) | models.Q(user2=request.user)
+        ).first()
+        
+        if friendship:
+            friendship.delete()
+            return JsonResponse({'success': True, 'message': '친구 관계가 삭제되었습니다.'})
+        else:
+            return JsonResponse({'success': False, 'message': '친구 관계를 찾을 수 없습니다.'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': '친구 관계 삭제 중 오류가 발생했습니다.'})

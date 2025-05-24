@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from django.http import JsonResponse
 import logging
 from apps.study.views import get_todays_word
+from django.contrib.admin.views.decorators import staff_member_required
 
 logger = logging.getLogger(__name__)
 
@@ -96,13 +97,15 @@ def signup_view(request):
             username=username,
             email=email,
             password=password1,
-            is_student=True
+            is_student=True,
+            nickname=nickname if nickname else ''  # 닉네임이 있으면 바로 저장
         )
 
-        # 프로필 업데이트
+        # 프로필 생성 및 닉네임 저장
         if nickname:
             user.profile.nickname = nickname
             user.profile.save()
+            user.save()  # User 모델의 변경사항도 저장
 
         login(request, user)
         messages.success(request, '회원가입이 완료되었습니다.')
@@ -147,9 +150,10 @@ def profile_view(request):
         bio = request.POST.get('bio')
         dark_mode = request.POST.get('dark_mode') == 'on'
 
-        # 닉네임 중복 체크
+        # 닉네임 중복 체크 (User와 UserProfile 모두 확인)
         if nickname and nickname != request.user.profile.nickname:
-            if UserProfile.objects.filter(nickname=nickname).exists():
+            if (UserProfile.objects.filter(nickname=nickname).exists() or 
+                CustomUser.objects.filter(nickname=nickname).exists()):
                 messages.error(request, '이미 사용 중인 닉네임입니다.')
                 return redirect('accounts:profile')
 
@@ -161,10 +165,17 @@ def profile_view(request):
             if active_plan:
                 active_plan.target_words_per_day = int(daily_goal)
                 active_plan.save()
+
+        # 닉네임 업데이트
         profile.nickname = nickname
         profile.bio = bio
         profile.dark_mode = dark_mode
         profile.save()
+
+        # User 모델에도 닉네임 저장
+        user = request.user
+        user.nickname = nickname
+        user.save()
 
         messages.success(request, '프로필이 업데이트되었습니다.')
         return redirect('accounts:profile')
@@ -310,3 +321,14 @@ def delete_account(request):
         return redirect('accounts:home')
 
     return redirect('accounts:profile')
+
+@staff_member_required
+def sync_nicknames(request):
+    """UserProfile.nickname → User.nickname 일괄 동기화 (관리자용)"""
+    updated = 0
+    for profile in UserProfile.objects.all():
+        if profile.nickname and (not profile.user.nickname or profile.user.nickname != profile.nickname):
+            profile.user.nickname = profile.nickname
+            profile.user.save()
+            updated += 1
+    return JsonResponse({'updated': updated, 'status': 'ok'})

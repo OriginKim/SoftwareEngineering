@@ -41,4 +41,5 @@ urlpatterns = [
              template_name='accounts/password_reset_complete.html'
          ),
          name='password_reset_complete'),
+    path('sync-nicknames/', views.sync_nicknames, name='sync_nicknames'),
 ] 

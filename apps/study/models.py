@@ -341,3 +341,31 @@ class StudyNotification(models.Model):
 
     def __str__(self):
         return f"{self.user.username}의 {self.notification_type} 알림"
+
+class FriendRequest(models.Model):
+    """친구 요청 모델"""
+    from_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sent_requests')
+    to_user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='received_requests')
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_accepted = models.BooleanField(default=False)
+    is_rejected = models.BooleanField(default=False)
+
+    class Meta:
+        unique_together = ('from_user', 'to_user')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.from_user.nickname} -> {self.to_user.nickname}"
+
+class Friendship(models.Model):
+    """친구 관계 모델"""
+    user1 = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='friendships1')
+    user2 = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='friendships2')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user1', 'user2')
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.user1.nickname} - {self.user2.nickname}"

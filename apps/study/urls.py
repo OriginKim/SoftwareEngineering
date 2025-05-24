@@ -43,10 +43,10 @@ urlpatterns = [
     # 알림 관련 URL
     path('notifications/', views.notification_list, name='notification_list'),
     path('notifications/settings/', views.notification_settings, name='notification_settings'),
-    path('notifications/<int:notification_id>/read/', views.mark_notification_read, name='mark_notification_read'),
+    path('notifications/mark-read/<int:notification_id>/', views.mark_notification_read, name='mark_notification_read'),
     path('notifications/mark-all-read/', views.mark_all_notifications_read, name='mark_all_notifications_read'),
     path('notifications/<int:notification_id>/delete/', views.delete_notification, name='delete_notification'),
-    path('notifications/delete-all/', views.notification_delete_all, name='notification_delete_all'),
+    path('notifications/delete-all/', views.delete_all_notifications, name='delete_all_notifications'),
 
     # 학습 모드 URL
     path('flashcard/', views.flashcard_study, name='flashcard'),
@@ -65,4 +65,12 @@ urlpatterns = [
     path('level-test/start/', views.level_test_start, name='level_test_start'),
     path('level-test/<int:test_id>/question/<int:question_number>/', views.level_test_question, name='level_test_question'),
     path('level-test/<int:test_id>/complete/', views.level_test_complete, name='level_test_complete'),
+
+    # 친구 관련 URL
+    path('friends/', views.friend_list, name='friend_list'),
+    path('friend_search/', views.friend_search, name='friend_search'),
+    path('friend_request/<int:user_id>/', views.send_friend_request, name='send_friend_request'),
+    path('friend_request/<int:request_id>/accept/', views.accept_friend_request, name='accept_friend_request'),
+    path('friend_request/<int:request_id>/reject/', views.reject_friend_request, name='reject_friend_request'),
+    path('friendship/<int:friendship_id>/delete/', views.delete_friendship, name='delete_friendship'),
 ] 
