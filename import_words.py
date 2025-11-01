@@ -5,9 +5,9 @@ from datetime import datetime
 # MySQL 연결 설정
 conn = mysql.connector.connect(
     host="localhost",
-    user="root",
-    password="1221",
-    database="sw_wordtest"
+    user="",
+    password="",
+    database=""
 )
 cursor = conn.cursor()
 
