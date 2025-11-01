@@ -100,13 +100,6 @@ Django admin 계정 필요 시: python manage.py createsuperuser
   https://www.notion.so/GenAI-Prompt-Code-1faa497b74888076a71bf9f2bce84748?pvs=21
 
 
-## 📌 향후 개선 예정 (v2 로드맵)
-- OAuth 로그인 적용 (구글·카카오)
-- 데일리 학습 리마인더 / 푸시 알림
-- REST API 완전 분리 → React/Flutter 클라이언트 연동
-- 오답/복습 알고리즘 (Spaced Repetition 기반)
-
-
 ## 👨‍💻 제작자
 - 역할: 백엔드 & DB 설계
 - 이름: OriginKim (김기원)
